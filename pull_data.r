@@ -3,8 +3,56 @@
 # load in packages
 require(pacman)
 p_load('rmarkdown','earthdatalogin', 'rstac','imager','lubridate','xts',
-       'dygraphs','leaflet','terra')
+       'dygraphs','leaflet','terra', 'gdalcubes', 'stars', 'ggplot2', 'tidyterra')
 
+bdr_box <- c(xmin = -79.827088, 
+             ymin = 37.311798, 
+             xmax = -79.811865, 
+             ymax = 37.321694)
+
+start_date <- "2025-06-01T00:00:00Z"
+end_date <- "2025-08-01T00:00:00Z"
+items <- stac("https://earth-search.aws.element84.com/v1/") |>
+  stac_search(collections = "sentinel-2-l2a",
+              bbox = bdr_box,
+              datetime = paste(start_date, end_date, sep="/"),
+              limit = 100) |>
+  ext_query("eo:cloud_cover" < 20) |>
+  post_request()
+items
+
+col <- stac_image_collection(items$features, asset_names = c("red", "nir08", "scl"))
+
+
+cube <- cube_view(srs ="EPSG:4326",
+                  extent = list(t0 = start_date, 
+                                t1 = end_date,
+                                left = bdr_box[1], 
+                                right = bdr_box[3],
+                                top = bdr_box[4], 
+                                bottom = bdr_box[2]),
+                  dx = 0.0001, 
+                  dy = 0.0001, 
+                  dt = "P1D",
+                  aggregation = "median", 
+                  resampling = "average")
+
+data <-  raster_cube(image_collection = col, 
+                     view = cube, 
+                     mask = mask)
+# mask cloud/cloud shadows (water is class 6)
+mask <- image_mask("scl", values=c(3, 8, 9)) # mask clouds and cloud shadows
+
+test <- data %>%
+  select_bands(bands = c("red", "nir08")) %>%
+  apply_pixel(expr = "(nir08-red)/(nir08+red)", names = "NDVI") %>%
+  reduce_time(expr = c("mean(NDVI)"), names = "NDVI_mean") 
+
+
+
+################################################################################
+#### following nasa tutorial
+################################################################################
 # define endpoint
 s = stac("https://cmr.earthdata.nasa.gov/stac/LPCLOUD/")
 
@@ -12,9 +60,10 @@ HLS_col <- list("HLSS30_2.0", "HLSL30_2.0")
 
 # set bounding box of beaverdam reservoir
 bdr_box <- c(xmin = -79.827088, ymin = 37.311798, xmax = -79.811865, ymax = 37.321694)
-
+# create roi
+# roi <- vect(cbind(c(-79.827088, -79.811865), c(37.311798, 37.321694)))
 # set date of interest
-roi_datetime <- '2021-08-01T00:00:00Z/2021-08-15T23:59:59Z' 
+roi_datetime <- '2021-08-01T00:00:00Z/2021-08-10T23:59:59Z' 
 
 # see what's available
 items <- s %>%
@@ -22,13 +71,22 @@ items <- s %>%
               bbox = bdr_box,
               datetime = roi_datetime,
               limit = 100) %>%
+  ext_query("eo:cloud_cover" < 20) %>%
   post_request()
-print(items)
+items
 
-# select an image and plot it
-browse_image_url <- items$features[[3]]$assets$browse$href
-browse <- imager::load.image(browse_image_url)
-#plot(browse)
+
+
+extract_asset_urls <- function(feature) {
+  collection_id <- feature$collection
+  if (collection_id == "HLSS30_2.0") {
+    bands = c('B8A','B04','Fmask')
+  } else if (collection_id == "HLSL30_2.0") {
+    bands = c('B05','B04','Fmask')}
+  sapply(bands, function(band) feature$assets[[band]]$href)
+}
+
+
 
 # place items in spatial df
 sf_items <- items_as_sf(items)
@@ -37,7 +95,6 @@ sf_items <- items_as_sf(items)
 granule_id <- sapply(items$features, function(feature) feature$id)
 # Add as first column in sf_items
 sf_items <- cbind(granule = granule_id, sf_items)
-View(sf_items)
 
 # select bands, filter clouds
 # Define a function to extract asset urls for selected bands
@@ -53,16 +110,11 @@ extract_asset_urls <- function(feature) {
 }
 # Retrieve Asset URLs for each feature using our extract_asset_urls function and transpose them to columns
 asset_urls <- t(sapply(items$features, extract_asset_urls))
-View(asset_urls)
 colnames(asset_urls) <- c('nir', 'red', 'fmask')
 sf_items <- cbind(sf_items, asset_urls)
-View(sf_items)
 
-# Filter based on cloud cover
-sf_items <- sf_items[sf_items$eo.cloud_cover < 30,]
 # Reset Row Indices
 row.names(sf_items) <- NULL
-View(sf_items)
 
 
 setGDALconfig("GDAL_HTTP_UNSAFESSL", value = "YES")
@@ -99,23 +151,33 @@ open_hls <- function(url, roi = NULL) {
   return(r)
 }
 # Test opening and crop
-red <- open_hls(sf_items$red[3])
+red <- open_hls(sf_items$red[2])
+red_reproj <- project(red, "epsg:4326")
 plot(red)
 
-nir <- open_hls(sf_items$nir[3])
-plot(nir)
 
-# make a stacked raster
-stacked <- c(red, nir)
-stacked_reproj <- project(stacked,"epsg:4326")
-stacked_crop <- crop(stacked_reproj, bdr_box)
+ggplot() + 
+  geom_spatraster(data = red_reproj) +
+  theme_classic() +
+  xlim(-79.827088, -79.811865) +
+  ylim(37.311798, 37.321694)
 
-plot(stacked_crop)
 
-# make stacks
-red_stack <- lapply(sf_items$red, open_hls)
-nir_stack <- lapply(sf_items$nir, open_hls)
-fmask_stack <- lapply(sf_items$fmask, open_hls)
+nir <- open_hls(sf_items$nir[2])
+nir_reproj <- project(nir, "epsg:4326")
+ggplot() + 
+  geom_spatraster(data = nir_reproj) +
+  theme_classic() +
+  xlim(-79.827088, -79.811865) +
+  ylim(37.311798, 37.321694)
+
+
+location <- data.frame(x = 37.315348, y = -79.819365)
+pt <- data.frame(lon = -79.819365, lat = 37.315348)
+nir_val <- terra::extract(nir_reproj, pt)
+
+
+
 
 ################################################################################
 # build mask to grab water
@@ -147,5 +209,7 @@ masked <- mapply(function(x, y) {
 masked <- rast(masked)
 
 plot(masked[[2]])
+
+
 
 
