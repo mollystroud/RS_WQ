@@ -10,28 +10,30 @@ p_load('rmarkdown','earthdatalogin', 'rstac','imager','lubridate','xts',
 ################################################################################
 # define endpoint
 s = stac("https://cmr.earthdata.nasa.gov/stac/LPCLOUD/")
-
+# we want both sentinel and landsat hls data
 HLS_col <- list("HLSS30_2.0", "HLSL30_2.0")
-
-# set bounding box of beaverdam reservoir
+# beaverdam reservoir bbox
 bdr_box <- c(xmin = -79.827088, ymin = 37.311798, xmax = -79.811865, ymax = 37.321694)
-# create roi
-# roi <- vect(cbind(c(-79.827088, -79.811865), c(37.311798, 37.321694)))
-# set date of interest
-roi_datetime <- '2021-08-01T00:00:00Z/2021-08-10T23:59:59Z' 
+# falling creek reservoir bbox
+fcr_box <- c(xmin = -79.840037, ymin = 37.301435, xmax = -79.833651, ymax = 37.311487)
+# carvins cove reservoir bbox
+ccr_box <- c(xmin = -79.981728, ymin = 37.367572, xmax = -79.942552, ymax = 37.407255)
 
-# see what's available
+# set date of interest (will need to change this later to update every day)
+datetime <- '2021-08-01T00:00:00Z/2021-08-10T23:59:59Z' 
+
+# grab items within dates of interest
 items <- s %>%
   stac_search(collections = HLS_col,
               bbox = bdr_box,
-              datetime = roi_datetime,
+              datetime = datetime,
               limit = 100) %>%
-  ext_query("eo:cloud_cover" < 20) %>%
+  ext_query("eo:cloud_cover" < 20) %>% #filter for cloud cover
   post_request()
 items
 
 
-
+# set up function to grab bands of interest for both HLSS and HLSL
 extract_asset_urls <- function(feature) {
   collection_id <- feature$collection
   if (collection_id == "HLSS30_2.0") {
@@ -40,47 +42,33 @@ extract_asset_urls <- function(feature) {
     bands = c('B05','B04','Fmask')}
   sapply(bands, function(band) feature$assets[[band]]$href)
 }
-
-
 
 # place items in spatial df
 sf_items <- items_as_sf(items)
 
-# Retrieve Granule ID for each feature
+# retrieve granule ID for each feature
 granule_id <- sapply(items$features, function(feature) feature$id)
-# Add as first column in sf_items
+
+# add as first column in sf_items
 sf_items <- cbind(granule = granule_id, sf_items)
 
-# select bands, filter clouds
-# Define a function to extract asset urls for selected bands
-# # This also includes a check to ensure the correct bands are extracted
-# # # depending on the collection (HLSL30 or HLSS30)
-extract_asset_urls <- function(feature) {
-  collection_id <- feature$collection
-  if (collection_id == "HLSS30_2.0") {
-    bands = c('B8A','B04','Fmask')
-  } else if (collection_id == "HLSL30_2.0") {
-    bands = c('B05','B04','Fmask')}
-  sapply(bands, function(band) feature$assets[[band]]$href)
-}
-# Retrieve Asset URLs for each feature using our extract_asset_urls function and transpose them to columns
+# retrieve asset URLs for each feature using extract_asset_urls function and transpose them to columns
 asset_urls <- t(sapply(items$features, extract_asset_urls))
-colnames(asset_urls) <- c('nir', 'red', 'fmask')
+colnames(asset_urls) <- c('nir', 'red', 'fmask') # clean up column names
 sf_items <- cbind(sf_items, asset_urls)
 
-# Reset Row Indices
+# reset row indices
 row.names(sf_items) <- NULL
 
-
+## 
 setGDALconfig("GDAL_HTTP_UNSAFESSL", value = "YES")
 setGDALconfig("GDAL_HTTP_COOKIEFILE", value = ".rcookies")
 setGDALconfig("GDAL_HTTP_COOKIEJAR", value = ".rcookies")
 setGDALconfig("GDAL_DISABLE_READDIR_ON_OPEN", value = "EMPTY_DIR")
 setGDALconfig("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", value = "TIF")
 
-# This function reads an HLS scene from a URL, applies the scale factor if necessary, and optionally crops and
-# masks the scene based on a polygon. It requries the above GDAL configurations and a .netrc file. A .netrc
-# can be created by running `earthdatalogin::edl_netrc()`.
+# read an HLS scene from URL, apply the scale factor if necessary, and optionally crops and
+# masks the scene based on a polygon. Requery the above GDAL configurations.
 open_hls <- function(url, roi = NULL) {
   # Add VSICURL prefix
   url <- paste0('/vsicurl/', url)
@@ -105,39 +93,18 @@ open_hls <- function(url, roi = NULL) {
   }
   return(r)
 }
+
 # Test opening and crop
-red <- open_hls(sf_items$red[2])
-red_reproj <- project(red, "epsg:4326")
-plot(red)
-
-
-ggplot() + 
-  geom_spatraster(data = red_reproj) +
-  theme_classic() +
-  xlim(-79.827088, -79.811865) +
-  ylim(37.311798, 37.321694)
-
-
 nir <- open_hls(sf_items$nir[2])
 nir_reproj <- project(nir, "epsg:4326")
-
-
-ggplot() + 
-  geom_spatraster(data = nir_reproj) +
-  theme_classic() +
-  xlim(-79.827088, -79.811865) +
-  ylim(37.31, 37.324)
-
 e <- terra::ext(-79.827088, -79.811865, 37.31, 37.324)
 nir_crop <- terra::crop(nir_reproj, e)
-
-
 
 ggplot() + 
   geom_spatraster(data = nir_crop) +
   theme_classic() 
 
-
+# extract value at location
 location <- data.frame(x = 37.315348, y = -79.819365)
 pt <- data.frame(lon = -79.819365, lat = 37.315348)
 nir_val <- terra::extract(nir_reproj, pt)
