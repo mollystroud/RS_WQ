@@ -21,22 +21,29 @@ bdr_box <- c(xmin = -79.827088, ymin = 37.311798, xmax = -79.811865, ymax = 37.3
 # falling creek reservoir bbox
 fcr_box <- c(xmin = -79.840037, ymin = 37.301435, xmax = -79.833651, ymax = 37.311487)
 # carvins cove reservoir bbox
-ccr_box <- c(xmin = -79.981728, ymin = 37.367572, xmax = -79.942552, ymax = 37.407255)
+ccr_box_wgs84 <- sf::st_bbox(c(xmin = -79.981728, ymin = 37.367562, 
+                               xmax = -79.942552, ymax = 37.407255), 
+                             crs = "EPSG:4326")
+
+# Convert the bounding box to the correct UTM projection
+ccr_box_utm <- sf::st_bbox(
+  sf::st_transform(sf::st_as_sfc(ccr_box_wgs84), "EPSG:32617")
+)
 
 # set date of interest (will need to change this later to update every day)
-datetime <- '2025-09-01T00:00:00Z/2025-09-12T23:59:59Z' 
-
+start_date <- "2024-06-01T00:00:00Z"
+end_date <- "2024-08-01T00:00:00Z"
 # grab items within dates of interest
 items <- s %>%
   stac_search(collections = HLS_col,
-              bbox = bdr_box,
-              datetime = datetime,
+              bbox = ccr_box,
+              datetime = paste(start_date, end_date, sep="/"),
               limit = 100) %>%
   ext_query("eo:cloud_cover" < 20) %>% #filter for cloud cover
-  post_request() %>% items_fetch()
+  post_request()
 items
 
-### test test test
+
 # gdalcubes has a function to set GDAL config options for HTTP / auth:
 gdalcubes_set_gdal_config("GDAL_HTTP_COOKIEJAR", "/tmp/cookies.txt")
 gdalcubes_set_gdal_config("GDAL_HTTP_COOKIEFILE", "/tmp/cookies.txt")
@@ -46,35 +53,56 @@ gdalcubes_set_gdal_config("GDAL_DISABLE_READDIR_ON_OPEN", "YES")
 
 # manually add projection info into each STAC item before passing to gdalcubes
 for (i in seq_along(items$features)) {
-  items$features[[i]]$properties$`proj:epsg` <- 4326  # force WGS84
+  items$features[[i]]$properties$`proj:epsg` <- 32617  # force correct projection
 }
+
+
+
 # pass to gdalcubes
 col <- stac_image_collection(
   items$features,
-  asset_names = c("B03", "B08"),
+  asset_names = c("B02", "B03", "B04"),
   url_fun = function(url) paste0("/vsicurl/", url)  # helps GDAL access
 )
 
-# define the cube!
-cube <- cube_view(srs ="EPSG:4326",
-                  extent = list(t0 = datetime, 
-                                t1 = datetime,
-                                left = bdr_box[1], 
-                                right = bdr_box[3],
-                                top = bdr_box[4], 
-                                bottom = bdr_box[2]),
-                  dx = 0.0001, 
-                  dy = 0.0001, 
+
+
+# define the cube space
+cube <- cube_view(srs ="EPSG:32617",
+                  extent = list(t0 = start_date, 
+                                t1 = end_date,
+                                left = ccr_box_utm[1], 
+                                right = ccr_box_utm[3],
+                                top = ccr_box_utm[4], 
+                                bottom = ccr_box_utm[2]),
+                  dx = 30, #0.0002695, 
+                  dy = 30, #0.0002695, 
                   dt = "P1D",
                   aggregation = "median", 
                   resampling = "average")
 
-mask <- image_mask("scl", values=c(3, 8, 9)) # mask clouds and cloud shadows
+# make raster cube
+data <- raster_cube(image_collection = col, 
+                     view = cube)
+plot(data)
 
-# bring it all together
-data <-  raster_cube(image_collection = col, 
-                     view = cube, 
-                     mask = mask)
+plot(data, rgb = c("B04", "B03", "B02"), zlim = c(0, 3000))
+
+
+
+
+# reduce
+x <- data |>
+  reduce_time(c("median(B02)","median(B03)","median(B04)"))
+plot(x, rgb=3:1, zlim=c(0,1200))
+
+
+
+
+
+
+
+
 
 
 
@@ -174,6 +202,10 @@ water_mask <- ndwi > threshold # identify values over threshold
 water_mask01 <- classify(water_mask, rcl = matrix(c(0, 0, 1, 1), ncol = 2, byrow = TRUE))
 plot(water_mask01, main = "Water Mask (Otsu Threshold)")
 plot(water_mask)
+ggplot() + 
+  geom_spatraster(data = water_mask) +
+  scale_fill_viridis() +
+  theme_classic() 
 
 # extract value at location
 location <- data.frame(x = 37.315348, y = -79.819365)
