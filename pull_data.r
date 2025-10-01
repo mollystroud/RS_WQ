@@ -5,7 +5,7 @@
 require(pacman)
 p_load('rmarkdown','earthdatalogin', 'rstac','imager','lubridate','xts',
        'dygraphs','leaflet','terra', 'stars', 'ggplot2', 'tidyterra', 'viridis',
-       'EBImage', 'gdalcubes')
+       'EBImage', 'gdalcubes', 'tmap', 'dplyr', 'cubelyr')
 ################################################################################
 ## the below code is adapted from a NASA tutorial
 # https://github.com/nasa/HLS-Data-Resources/blob/main/r/HLS_Tutorial.Rmd
@@ -21,7 +21,8 @@ bdr_box <- c(xmin = -79.827088, ymin = 37.311798, xmax = -79.811865, ymax = 37.3
 # falling creek reservoir bbox
 fcr_box <- c(xmin = -79.840037, ymin = 37.301435, xmax = -79.833651, ymax = 37.311487)
 # carvins cove reservoir bbox
-ccr_box_wgs84 <- sf::st_bbox(c(xmin = -79.981728, ymin = 37.367562, 
+ccr_box <- c(xmin = -79.981728, ymin = 37.367542, xmax = -79.942552, ymax = 37.407255)
+ccr_box_wgs84 <- sf::st_bbox(c(xmin = -79.981728, ymin = 37.367542, 
                                xmax = -79.942552, ymax = 37.407255), 
                              crs = "EPSG:4326")
 
@@ -31,8 +32,8 @@ ccr_box_utm <- sf::st_bbox(
 )
 
 # set date of interest (will need to change this later to update every day)
-start_date <- "2024-06-01T00:00:00Z"
-end_date <- "2024-08-01T00:00:00Z"
+start_date <- "2024-07-01T00:00:00Z"
+end_date <- "2024-07-15T00:00:00Z"
 # grab items within dates of interest
 items <- s %>%
   stac_search(collections = HLS_col,
@@ -61,7 +62,7 @@ for (i in seq_along(items$features)) {
 # pass to gdalcubes
 col <- stac_image_collection(
   items$features,
-  asset_names = c("B02", "B03", "B04"),
+  asset_names = c("B02", "B03", "B04", "B11"),
   url_fun = function(url) paste0("/vsicurl/", url)  # helps GDAL access
 )
 
@@ -84,33 +85,40 @@ cube <- cube_view(srs ="EPSG:32617",
 # make raster cube
 data <- raster_cube(image_collection = col, 
                      view = cube)
-plot(data)
+# test plot
+plot(data, rgb=3:1, zlim=c(0,1200))
 
-plot(data, rgb = c("B04", "B03", "B02"), zlim = c(0, 3000))
-
-
-
-
-# reduce
-x <- data |>
-  reduce_time(c("median(B02)","median(B03)","median(B04)"))
-plot(x, rgb=3:1, zlim=c(0,1200))
+test <- data |>
+  select_bands(bands = c("B03", "B11")) |>
+  apply_pixel(expr = "(B03-B11)/(B03+B11)", names = "mNDWI") #|>
+  write_ncdf("ndvi.nc", overwrite = TRUE)
 
 
+# open as stars object
+test_stars <- st_as_stars(test)
+
+# plot green band
+tm_shape(shp = test_stars) + 
+  tm_raster(col = "mNDWI")
 
 
+is_empty <- st_apply(test_stars, "time", function(x) all(is.na(x)))
+# Assuming is_empty has only ONE attribute, this is the safest way to get the array:
+is_empty_vector <- is_empty[[1]] 
+# This vector will have the same length as the time dimension.
+# This works whether is_empty is an array or a list of arrays.
 
+# Now use this logical vector to select the dimension values
+vals_to_keep <- st_get_dimension_values(test_stars, "time")[!is_empty_vector]
 
+filtered_stars_object <- test_stars %>%
+  filter(.data[["time"]] %in% vals_to_keep)
 
+value <- st_extract()
 
-
-
-
-
-
-
-
-
+################################################################################
+# with rast() instead of gdalcubes
+################################################################################
 
 # place items in spatial df
 sf_items <- items_as_sf(items)
@@ -178,14 +186,14 @@ open_hls <- function(url, roi = NULL) {
   return(r)
 }
 
-swir <- open_hls(sf_items$SWIR[5], bdr_box)
+swir <- open_hls(sf_items$SWIR[1], bdr_box)
 
 ggplot() + 
-  geom_spatraster(data = nir) +
+  geom_spatraster(data = swir) +
   scale_fill_viridis() +
   theme_classic() 
 
-green <- open_hls(sf_items$green[5], bdr_box)
+green <- open_hls(sf_items$green[1], bdr_box)
 
 ndwi <- (green - swir) / (green + swir)
 
@@ -194,9 +202,10 @@ ggplot() +
   scale_fill_viridis() +
   theme_classic() 
 # identify water using the Otsu thresholding method
-vals <- values(ndwi) # get ndwi values
+vals <- values(ndwi, mat = F) # get ndwi values
 vals <- vals[!is.na(vals)] # remove any nas
-threshold <- otsu(vals) # use otsu to threshold
+vals_scaled <- (vals - min(vals, na.rm = TRUE)) / (max(vals, na.rm = TRUE) - min(vals, na.rm = TRUE))
+threshold <- otsu(matrix(vals_scaled, ncol = 1)) # use otsu to threshold
 water_mask <- ndwi > threshold # identify values over threshold
 #classify and plot
 water_mask01 <- classify(water_mask, rcl = matrix(c(0, 0, 1, 1), ncol = 2, byrow = TRUE))
@@ -212,7 +221,6 @@ location <- data.frame(x = 37.315348, y = -79.819365)
 pt <- data.frame(lon = -79.819365, lat = 37.315348)
 nir_val <- terra::extract(nir_reproj, pt)
 
-fmask <- open_hls(sf_items$fmask[2], bdr_box)
 
 
 
