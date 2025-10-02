@@ -33,7 +33,8 @@ ccr_box_utm <- sf::st_bbox(
 
 # set date of interest (will need to change this later to update every day)
 start_date <- "2024-07-01T00:00:00Z"
-end_date <- "2024-07-15T00:00:00Z"
+end_date <- "2024-07-30T00:00:00Z"
+
 # grab items within dates of interest
 items <- s %>%
   stac_search(collections = HLS_col,
@@ -57,9 +58,19 @@ for (i in seq_along(items$features)) {
 }
 
 # pass to gdalcubes
-col <- stac_image_collection(
-  items$features,
-  asset_names = c("B02", "B03", "B04", "B11"),
+# need to separate HLSL and HLSS data since they have different band names
+ss_items <- items$features[sapply(items$features, function(f) f$collection == "HLSS30_2.0")]
+sl_items <- items$features[sapply(items$features, function(f) f$collection == "HLSL30_2.0")]
+# sentinel collection
+col_S30 <- stac_image_collection(
+  ss_items,
+  asset_names = c("B02", "B03", "B04", "B8A", "B11"),
+  url_fun = function(url) paste0("/vsicurl/", url)  # helps GDAL access
+)
+# landsat collection
+col_L30 <- stac_image_collection(
+  sl_items,
+  asset_names = c("B02", "B03", "B04", "B05", "B06"),
   url_fun = function(url) paste0("/vsicurl/", url)  # helps GDAL access
 )
 
@@ -78,21 +89,36 @@ cube <- cube_view(srs ="EPSG:32617",
                   resampling = "average")
 
 # make raster cube
-data <- raster_cube(image_collection = col, 
+data_S30 <- raster_cube(image_collection = col_S30, 
                      view = cube)
+data_S30 <- rename_bands(data_S30, B02 = "blue", B03 = "green", B04 = "red",
+                         B8A = "NIR", B11 = "SWIR")
+
+data_L30 <- raster_cube(image_collection = col_L30, 
+                        view = cube)
+data_L30 <- rename_bands(data_L30, B02 = "blue", B03 = "green", B04 = "red",
+                         B05 = "NIR", B06 = "SWIR")
+
 # test plot
-# plot(data, rgb=3:1, zlim=c(0,1200))
+#plot(data, rgb=3:1, zlim=c(0,1200))
 
 # calculate mNDWI
-test <- data |>
-  select_bands(bands = c("B03", "B11")) |>
-  apply_pixel(expr = "(B03-B11)/(B03+B11)", names = "mNDWI")
+mndwi_S30 <- data_S30 |>
+  select_bands(bands = c("green", "SWIR")) |>
+  apply_pixel(expr = "(green-SWIR)/(green+SWIR)", names = "mNDWI")
 
-# open as stars object
-test_stars <- st_as_stars(test)
+mndwi_L30 <- data_L30 |>
+  select_bands(bands = c("green", "SWIR")) |>
+  apply_pixel(expr = "(green-SWIR)/(green+SWIR)", names = "mNDWI")
+
+# open as stars objects and merge
+mndwi_stars_S30 <- st_as_stars(mndwi_S30)
+mndwi_stars_L30 <- st_as_stars(mndwi_L30)
+mndwi_stars <- c(mndwi_stars_S30, mndwi_stars_L30, along = 3)
+
 # remove dates with no imagery
 # extract raw array (x, y, time)
-arr <- test_stars[[1]]
+arr <- mndwi_stars[[1]]
 
 # count non-NA pixels for each time slice
 non_na_counts <- apply(arr, 3, function(slice) sum(!is.na(slice)))
@@ -101,20 +127,38 @@ non_na_counts <- apply(arr, 3, function(slice) sum(!is.na(slice)))
 valid_idx <- which(non_na_counts > 0)
 
 # build cleaned object by stacking only valid slices
-slices <- lapply(valid_idx, function(i) test_stars[,,, i, drop = FALSE])
-clean_stars <- do.call(c, c(slices, along = "time"))
+slices <- lapply(valid_idx, function(i) mndwi_stars[,,, i, drop = FALSE])
+clean_mndwi_stars <- do.call(c, c(slices, along = "time"))
 
-# plot
-tm_shape(shp = clean_stars) + 
+# viz
+tm_shape(shp = clean_mndwi_stars) + 
   tm_raster(col = "mNDWI")
 
+# identify water using the Otsu thresholding method (https://ieeexplore.ieee.org/document/4310076)
+vals <- as.vector(clean_mndwi_stars[[1]])
+# scale to 0 to 1 so we can apply Otsu thresholding
+vals_scaled <- (vals - min(vals, na.rm = TRUE)) / (max(vals, na.rm = TRUE) - min(vals, na.rm = TRUE))
+# calculate the Otsu threshold 
+threshold <- otsu(matrix(vals_scaled, ncol = 1)) # use otsu to threshold
+# threshold the image data to create a binary mask
+binary_mask_matrix <- (clean_mndwi_stars[[1]] > threshold)
+binary_stars <- st_as_stars(list(star_mask = binary_mask_matrix),
+                            dimensions = st_dimensions(clean_stars))
 
 
+# viz
+tm_shape(shp = binary_stars) + 
+  tm_raster(col = "star_mask")
 
 
+test <- as(clean_stars, "Raster")
+plot(test)
+test_mask <- as(binary_stars, "Raster")
+plot(test_mask)
 
+test_masked <- terra::mask(test$layer, test_mask$layer)
 
-
+plot(test_masked)
 
 
 ################################################################################
@@ -187,14 +231,14 @@ open_hls <- function(url, roi = NULL) {
   return(r)
 }
 
-swir <- open_hls(sf_items$SWIR[1], bdr_box)
+swir <- open_hls(sf_items$SWIR[1], ccr_box)
 
 ggplot() + 
   geom_spatraster(data = swir) +
   scale_fill_viridis() +
   theme_classic() 
 
-green <- open_hls(sf_items$green[1], bdr_box)
+green <- open_hls(sf_items$green[1], ccr_box)
 
 ndwi <- (green - swir) / (green + swir)
 
@@ -221,41 +265,6 @@ ggplot() +
 location <- data.frame(x = 37.315348, y = -79.819365)
 pt <- data.frame(lon = -79.819365, lat = 37.315348)
 nir_val <- terra::extract(nir_reproj, pt)
-
-
-
-
-###########################fmask################################################################################
-# build mask to exclude non-water pixels
-################################################################################
-build_mask <- function(fmask, selected_bit_nums){
-  # Create a mask of all zeros
-  mask <- rast(fmask, vals=0)
-  for (b in selected_bit_nums){
-    # Apply Bitwise AND to fmask values and selected bit numbers
-    mask_temp <- app(fmask, function(x) bitwAnd(x, bitwShiftL(1,b)) >0)
-    # Update Mask to maintain only 1 layer with bitwise OR
-    mask <- mask | mask_temp
-  }
-  return(mask)
-}
-selected_bit_nums <- c(5)
-
-qmask <- build_mask(fmask, selected_bit_nums)
-plot(qmask)
-
-# Create List of Masks
-qmask_stack <- lapply(fmask_stack, build_mask, selected_bit_nums=selected_bit_nums)
-
-# Apply Mask using NA Values
-masked <- mapply(function(x, y) {
-  mask(x, y, maskvalue = TRUE, updatevalue = NA)
-}, red_stack, qmask_stack, SIMPLIFY = FALSE)
-
-
-masked <- rast(masked)
-
-plot(masked[[2]])
 
 
 
