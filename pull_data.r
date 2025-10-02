@@ -7,8 +7,8 @@ p_load('rmarkdown','earthdatalogin', 'rstac','imager','lubridate','xts',
        'dygraphs','leaflet','terra', 'stars', 'ggplot2', 'tidyterra', 'viridis',
        'EBImage', 'gdalcubes', 'tmap', 'dplyr', 'cubelyr')
 ################################################################################
-## the below code is adapted from a NASA tutorial
-# https://github.com/nasa/HLS-Data-Resources/blob/main/r/HLS_Tutorial.Rmd
+## the below code is designed to pull HLS imagery over a specified area and 
+# mask out any land
 ################################################################################
 # define endpoint
 s = stac("https://cmr.earthdata.nasa.gov/stac/LPCLOUD/")
@@ -26,7 +26,7 @@ ccr_box_wgs84 <- sf::st_bbox(c(xmin = -79.981728, ymin = 37.367542,
                                xmax = -79.942552, ymax = 37.407255), 
                              crs = "EPSG:4326")
 
-# Convert the bounding box to the correct UTM projection
+# Convert the bounding boxes to the correct UTM projection
 ccr_box_utm <- sf::st_bbox(
   sf::st_transform(sf::st_as_sfc(ccr_box_wgs84), "EPSG:32617")
 )
@@ -44,8 +44,7 @@ items <- s %>%
   post_request()
 items
 
-
-# gdalcubes has a function to set GDAL config options for HTTP / auth:
+# set GDAL config options for HTTP / auth:
 gdalcubes_set_gdal_config("GDAL_HTTP_COOKIEJAR", "/tmp/cookies.txt")
 gdalcubes_set_gdal_config("GDAL_HTTP_COOKIEFILE", "/tmp/cookies.txt")
 # and possibly disable listing on open
@@ -57,16 +56,12 @@ for (i in seq_along(items$features)) {
   items$features[[i]]$properties$`proj:epsg` <- 32617  # force correct projection
 }
 
-
-
 # pass to gdalcubes
 col <- stac_image_collection(
   items$features,
   asset_names = c("B02", "B03", "B04", "B11"),
   url_fun = function(url) paste0("/vsicurl/", url)  # helps GDAL access
 )
-
-
 
 # define the cube space
 cube <- cube_view(srs ="EPSG:32617",
@@ -76,8 +71,8 @@ cube <- cube_view(srs ="EPSG:32617",
                                 right = ccr_box_utm[3],
                                 top = ccr_box_utm[4], 
                                 bottom = ccr_box_utm[2]),
-                  dx = 30, #0.0002695, 
-                  dy = 30, #0.0002695, 
+                  dx = 30, # 30 m resolution
+                  dy = 30, 
                   dt = "P1D",
                   aggregation = "median", 
                   resampling = "average")
@@ -86,35 +81,41 @@ cube <- cube_view(srs ="EPSG:32617",
 data <- raster_cube(image_collection = col, 
                      view = cube)
 # test plot
-plot(data, rgb=3:1, zlim=c(0,1200))
+# plot(data, rgb=3:1, zlim=c(0,1200))
 
+# calculate mNDWI
 test <- data |>
   select_bands(bands = c("B03", "B11")) |>
-  apply_pixel(expr = "(B03-B11)/(B03+B11)", names = "mNDWI") #|>
-  write_ncdf("ndvi.nc", overwrite = TRUE)
-
+  apply_pixel(expr = "(B03-B11)/(B03+B11)", names = "mNDWI")
 
 # open as stars object
 test_stars <- st_as_stars(test)
+# remove dates with no imagery
+# extract raw array (x, y, time)
+arr <- test_stars[[1]]
 
-# plot green band
-tm_shape(shp = test_stars) + 
+# count non-NA pixels for each time slice
+non_na_counts <- apply(arr, 3, function(slice) sum(!is.na(slice)))
+
+# indices of slices that have at least one real value
+valid_idx <- which(non_na_counts > 0)
+
+# build cleaned object by stacking only valid slices
+slices <- lapply(valid_idx, function(i) test_stars[,,, i, drop = FALSE])
+clean_stars <- do.call(c, c(slices, along = "time"))
+
+# plot
+tm_shape(shp = clean_stars) + 
   tm_raster(col = "mNDWI")
 
 
-is_empty <- st_apply(test_stars, "time", function(x) all(is.na(x)))
-# Assuming is_empty has only ONE attribute, this is the safest way to get the array:
-is_empty_vector <- is_empty[[1]] 
-# This vector will have the same length as the time dimension.
-# This works whether is_empty is an array or a list of arrays.
 
-# Now use this logical vector to select the dimension values
-vals_to_keep <- st_get_dimension_values(test_stars, "time")[!is_empty_vector]
 
-filtered_stars_object <- test_stars %>%
-  filter(.data[["time"]] %in% vals_to_keep)
 
-value <- st_extract()
+
+
+
+
 
 ################################################################################
 # with rast() instead of gdalcubes
