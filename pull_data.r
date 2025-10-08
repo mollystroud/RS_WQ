@@ -3,9 +3,9 @@
 ################################################################################
 # load in packages
 require(pacman)
-p_load('rmarkdown','earthdatalogin', 'rstac','imager','lubridate','xts',
-       'dygraphs','leaflet','terra', 'stars', 'ggplot2', 'tidyterra', 'viridis',
-       'EBImage', 'gdalcubes', 'tmap', 'dplyr', 'cubelyr')
+p_load('earthdatalogin', 'rstac', 'terra', 'stars', 'ggplot2', 'tidyterra', 
+       'viridis', 'EBImage', 'gdalcubes', 'tmap', 'dplyr', 'tidyverse', 'sf')
+# likely unused: 'imager', 'lubridate','xts','dygraphs', 'leaflet', 'cubelyr'
 ################################################################################
 ## the below code is designed to pull HLS imagery over a specified area and 
 # mask out any land
@@ -17,7 +17,7 @@ s = stac("https://cmr.earthdata.nasa.gov/stac/LPCLOUD/")
 HLS_col <- list("HLSS30_2.0", "HLSL30_2.0")
 
 # beaverdam reservoir bbox
-bdr_box <- c(xmin = -79.827088, 
+bvr_box <- c(xmin = -79.827088, 
              ymin = 37.311798, 
              xmax = -79.811865, 
              ymax = 37.321694)
@@ -33,7 +33,7 @@ ccr_box <- c(xmin = -79.981728,
              ymax = 37.407255)
 
 # convert the bounding boxes to the correct UTM projection
-bdr_box_utm <- sf::st_bbox(
+bvr_box_utm <- sf::st_bbox(
   sf::st_transform(sf::st_as_sfc(sf::st_bbox(c(xmin = -79.827088, 
                                                ymin = 37.311798, 
                                                xmax = -79.811865, 
@@ -223,6 +223,22 @@ tm_shape(shp = masked_scaled) +
   tm_rgb(r = "red", g = "green", b = "blue",
          col.scale = tm_scale_rgb(max_color_value = .08))
 
+
+
+################################################################################
+# try reading in some WQ data from reservoirs
+################################################################################
+chla <- read_csv("filt-chla_2014_2024.csv")
+# only surface measurements
+chla <- chla[chla$Depth_m <= 0.1,]
+# match with lat/long
+sitelocs <- read_csv("site_descriptions.csv")
+chla <- left_join(chla, sitelocs[2:5], by = "Site")
+
+# only ccr, bvr, fcr
+chla_ccr <- chla[chla$Reservoir == "CCR",]
+chla_fcr <- chla[chla$Reservoir == "FCR",]
+chla_bvr <- chla[chla$Reservoir == "BVR",]
 
 
 
