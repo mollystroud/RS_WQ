@@ -5,7 +5,8 @@
 # load in packages
 require(pacman)
 p_load('earthdatalogin', 'rstac', 'terra', 'stars', 'ggplot2', 'tidyterra', 
-       'viridis', 'EBImage', 'gdalcubes', 'tmap', 'dplyr', 'tidyverse', 'sf')
+       'viridis', 'EBImage', 'gdalcubes', 'tmap', 'dplyr', 'tidyverse', 'sf',
+       'fuzzyjoin')
 ################################################################################
 # the below code is designed to match up in situ chl-a data over CCR, FCR, and
 # BVR with HLS data
@@ -56,7 +57,7 @@ gdalcubes_set_gdal_config("CPL_VSIL_CURL_USE_HEAD", "FALSE")
 gdalcubes_set_gdal_config("GDAL_DISABLE_READDIR_ON_OPEN", "YES")
 
 
-# grab items within dates of interest
+# function to identify all imagery within start and end dates
 get_dates <- function(bbox, dates) {
   # get start and end dates
   start_date <- paste0(dates[1], "T00:00:00Z")
@@ -67,7 +68,7 @@ get_dates <- function(bbox, dates) {
                 bbox = bbox,
                 datetime = paste(start_date, end_date, sep="/"),
                 limit = 500) %>%
-    ext_query("eo:cloud_cover" < 20) %>% #filter for cloud cover
+    ext_query("eo:cloud_cover" < 20) %>% # filter for cloud cover
     post_request() %>%
     items_fetch()
   dates <- sapply(items$features, function(x) x$properties$datetime)
@@ -79,21 +80,43 @@ fcr_hls_datetime <- get_dates(fcr_box, fcr_dates)
 bvr_hls_datetime <- get_dates(bvr_box, bvr_dates)
 
 # now fuzzy match dates with in situ dates
-# first, lose the time
+fuzzy_join_dates <- function(hls_datetime, chla_dates){
+  # put into dataframe
+  hls_dates <- data.frame(t(data.frame(lapply(hls_datetime, as.Date))))
+  row.names(hls_dates) <- NULL # remove row names
+  colnames(hls_dates) <- c("HLS_dates") # name column
+  hls_dates$HLS_dates <- as.Date(hls_dates$HLS_dates) # make Date
+  # join together
+  chla_dates <- data.frame(chla_dates)
+  joined <- difference_inner_join(
+    hls_dates, chla_dates,
+    by = c("HLS_dates" = colnames(chla_dates)),
+    max_dist = 1, # day difference
+    distance_col = "day_diff"
+  )
+}
+
+ccr_joined <- fuzzy_join_dates(ccr_hls_datetime, ccr_dates)
+fcr_joined <- fuzzy_join_dates(fcr_hls_datetime, fcr_dates)
+bvr_joined <- fuzzy_join_dates(bvr_hls_datetime, bvr_dates)
+
+# now join back with full chla data. possibly make this a function or add to above function
 # ccr
-ccr_hls_dates <- t(data.frame(lapply(ccr_hls_datetime, as.Date)))
-row.names(ccr_hls_dates) <- NULL
-colnames(ccr_hls_dates) <- c("Date")
+chla_ccr$DateTime <- as.Date(chla_ccr$DateTime)
+ccr_chla_joined <- chla_ccr[chla_ccr$DateTime %in% ccr_joined$chla_dates,]
+ccr_chla_joined <- left_join(ccr_chla_joined, ccr_joined, 
+                             by = c("DateTime" = "chla_dates"))
 # fcr
-fcr_hls_dates <- t(data.frame(lapply(fcr_hls_datetime, as.Date)))
-row.names(fcr_hls_dates) <- NULL
-colnames(fcr_hls_dates) <- c("Date")
-# bvr
-bvr_hls_dates <- t(data.frame(lapply(bvr_hls_datetime, as.Date)))
-row.names(bvr_hls_dates) <- NULL
-colnames(bvr_hls_dates) <- c("Date")
+chla_fcr$DateTime <- as.Date(chla_fcr$DateTime)
+fcr_chla_joined <- chla_fcr[chla_fcr$DateTime %in% fcr_joined$chla_dates,]
+fcr_chla_joined <- left_join(fcr_chla_joined, fcr_joined, 
+                             by = c("DateTime" = "chla_dates"))
+#bvr
+chla_bvr$DateTime <- as.Date(chla_bvr$DateTime)
+bvr_chla_joined <- chla_bvr[chla_bvr$DateTime %in% bvr_joined$chla_dates,]
+bvr_chla_joined <- left_join(bvr_chla_joined, bvr_joined, 
+                             by = c("DateTime" = "chla_dates"))
 
-
-
+# next: download data and extract points of interest using gdalcubes extract_geom
 
 
