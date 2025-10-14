@@ -146,7 +146,8 @@ bvr_chla_joined <- left_join(bvr_chla_joined, bvr_joined,
 ################################################################################
 # ok maybe 
 start_date <- paste0(bvr_chla_joined$HLS_dates[1], "T00:00:00Z")
-end_date <- paste0(bvr_chla_joined$HLS_dates[30], "T00:00:00Z")
+end_date <- paste0(bvr_chla_joined$HLS_dates[38], "T00:00:00Z")
+end_date <- paste0(bvr_chla_joined$HLS_dates[length(bvr_chla_joined$HLS_dates)], "T00:00:00Z")
 # grab items within dates of interest
 items <- s %>%
   stac_search(collections = HLS_col,
@@ -156,6 +157,31 @@ items <- s %>%
   ext_query("eo:cloud_cover" < 20) %>% #filter for cloud cover
   post_request()
 items
+
+dates <- unique(bvr_chla_joined$HLS_dates)
+
+items_list <- lapply(dates, function(d) {
+  stac_search(q = s,
+              collections = HLS_col,
+              bbox = bvr_box,
+              datetime = paste0(d,"T00:00:00Z", "/", d, "T23:59:59Z"),
+              limit = 500) %>% 
+    ext_query("eo:cloud_cover" < 20) %>%
+    post_request()
+})
+
+# merge list
+merged_items <- items_list[[1]]
+for(i in 2:length(items_list)){
+  merged_items$features <- c(merged_items$features, items_list[[i]]$features)
+}
+# update metadata
+merged_items$numberMatched <- length(merged_items$features)
+merged_items$numberReturned <- length(merged_items$features)
+class(merged_items) <- c("stac_item_collection", "list")
+
+items <- merged_items
+
 
 # manually add projection info into each STAC item before passing to gdalcubes
 # for some reason HLS data doesn't have this automatically included?
@@ -191,7 +217,7 @@ cube <- cube_view(srs ="EPSG:32617",
                                 bottom = bvr_box_utm[2]),
                   dx = 30, # 30 m resolution
                   dy = 30, 
-                  dt = "P1D",
+                  dt = 'P1D',
                   aggregation = "median", 
                   resampling = "average")
 
@@ -213,7 +239,7 @@ projcrs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
 points <- st_as_sf(x = points,                         
          coords = c("X1", "X2"),
          crs = projcrs)
-test <- extract_geom(data_S30, points, drop_geom = F)
+test <- extract_geom(data_L30, points)
 test
 
 
