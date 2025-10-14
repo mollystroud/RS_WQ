@@ -225,20 +225,7 @@ tm_shape(shp = masked_scaled) +
 
 
 
-################################################################################
-# try reading in some WQ data from reservoirs
-################################################################################
-chla <- read_csv("filt-chla_2014_2024.csv")
-# only surface measurements
-chla <- chla[chla$Depth_m <= 0.1,]
-# match with lat/long
-sitelocs <- read_csv("site_descriptions.csv")
-chla <- left_join(chla, sitelocs[2:5], by = "Site")
 
-# only ccr, bvr, fcr
-chla_ccr <- chla[chla$Reservoir == "CCR",]
-chla_fcr <- chla[chla$Reservoir == "FCR",]
-chla_bvr <- chla[chla$Reservoir == "BVR",]
 
 
 

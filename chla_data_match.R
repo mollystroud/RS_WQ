@@ -49,6 +49,29 @@ ccr_box <- c(xmin = -79.981728,
              xmax = -79.942552, 
              ymax = 37.407255)
 
+# convert the bounding boxes to the correct UTM projection
+bvr_box_utm <- sf::st_bbox(
+  sf::st_transform(sf::st_as_sfc(sf::st_bbox(c(xmin = -79.827088, 
+                                               ymin = 37.311798, 
+                                               xmax = -79.811865, 
+                                               ymax = 37.321694), 
+                                             crs = "EPSG:4326")), "EPSG:32617")
+)
+fcr_box_utm <- sf::st_bbox(
+  sf::st_transform(sf::st_as_sfc(sf::st_bbox(c(xmin = -79.840037, 
+                                               ymin = 37.301435, 
+                                               xmax = -79.833651, 
+                                               ymax = 37.311487), 
+                                             crs = "EPSG:4326")), "EPSG:32617")
+)
+ccr_box_utm <- sf::st_bbox(
+  sf::st_transform(sf::st_as_sfc(sf::st_bbox(c(xmin = -79.981728, 
+                                               ymin = 37.367522, 
+                                               xmax = -79.942552, 
+                                               ymax = 37.407255), 
+                                             crs = "EPSG:4326")), "EPSG:32617")
+)
+
 # set GDAL config options for HTTP / auth:
 gdalcubes_set_gdal_config("GDAL_HTTP_COOKIEJAR", "/tmp/cookies.txt")
 gdalcubes_set_gdal_config("GDAL_HTTP_COOKIEFILE", "/tmp/cookies.txt")
@@ -117,6 +140,82 @@ bvr_chla_joined <- chla_bvr[chla_bvr$DateTime %in% bvr_joined$chla_dates,]
 bvr_chla_joined <- left_join(bvr_chla_joined, bvr_joined, 
                              by = c("DateTime" = "chla_dates"))
 
-# next: download data and extract points of interest using gdalcubes extract_geom
 
+################################################################################
+# next: download data and extract points of interest using gdalcubes extract_geom
+################################################################################
+# ok maybe 
+start_date <- paste0(bvr_chla_joined$HLS_dates[1], "T00:00:00Z")
+end_date <- paste0(bvr_chla_joined$HLS_dates[30], "T00:00:00Z")
+# grab items within dates of interest
+items <- s %>%
+  stac_search(collections = HLS_col,
+              bbox = bvr_box,
+              datetime = paste(start_date, end_date, sep="/"),
+              limit = 500) %>%
+  ext_query("eo:cloud_cover" < 20) %>% #filter for cloud cover
+  post_request()
+items
+
+# manually add projection info into each STAC item before passing to gdalcubes
+# for some reason HLS data doesn't have this automatically included?
+for (i in seq_along(items$features)) {
+  items$features[[i]]$properties$`proj:epsg` <- 32617  # force correct projection
+}
+
+# pass to gdalcubes
+# need to separate HLSL and HLSS data since they have different band configs
+ss_items <- items$features[sapply(items$features, function(f) f$collection == "HLSS30_2.0")]
+sl_items <- items$features[sapply(items$features, function(f) f$collection == "HLSL30_2.0")]
+
+# sentinel collection
+col_S30 <- stac_image_collection(
+  ss_items,
+  asset_names = c("B02", "B03", "B04", "B8A"),
+  url_fun = function(url) paste0("/vsicurl/", url)  # helps GDAL access
+)
+# landsat collection
+col_L30 <- stac_image_collection(
+  sl_items,
+  asset_names = c("B02", "B03", "B04", "B05"),
+  url_fun = function(url) paste0("/vsicurl/", url)  # helps GDAL access
+)
+
+# define the cube space
+cube <- cube_view(srs ="EPSG:32617",
+                  extent = list(t0 = start_date, 
+                                t1 = end_date,
+                                left = bvr_box_utm[1], 
+                                right = bvr_box_utm[3],
+                                top = bvr_box_utm[4], 
+                                bottom = bvr_box_utm[2]),
+                  dx = 30, # 30 m resolution
+                  dy = 30, 
+                  dt = "P1D",
+                  aggregation = "median", 
+                  resampling = "average")
+
+# HLSS
+data_S30 <- raster_cube(image_collection = col_S30, 
+                        view = cube)
+data_S30 <- rename_bands(data_S30, B02 = "blue", B03 = "green", B04 = "red",
+                         B8A = "NIR")
+#HLSL
+data_L30 <- raster_cube(image_collection = col_L30, 
+                        view = cube)
+data_L30 <- rename_bands(data_L30, B02 = "blue", B03 = "green", B04 = "red",
+                         B05 = "NIR")
+
+# get unique lat/longs
+points <- data.frame(unique(cbind(bvr_chla_joined$Longitude, bvr_chla_joined$Latitude)))
+points <- mutate(points, FID = row_number())
+projcrs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+points <- st_as_sf(x = points,                         
+         coords = c("X1", "X2"),
+         crs = projcrs)
+test <- extract_geom(data_S30, points, drop_geom = F)
+test
+
+
+with_coords <- left_join(test, points, by = "FID")
 

@@ -8,6 +8,7 @@ library(sf)
 library(ggplot2)
 library(patchwork)
 library(ggspatial)
+library(viridis)
 ################################################################################
 # plot LakeSP product over roanoke reservoirs
 ################################################################################
