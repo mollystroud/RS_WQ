@@ -144,36 +144,109 @@ bvr_chla_joined <- left_join(bvr_chla_joined, bvr_joined,
 ################################################################################
 # next: download data and extract points of interest using gdalcubes extract_geom
 ################################################################################
-# grab items ON dates of interest
-dates <- unique(bvr_chla_joined$HLS_dates)
-# get list of imagery
-items_list <- lapply(dates, function(d) {
-  stac_search(q = s,
-              collections = HLS_col,
-              bbox = bvr_box,
-              datetime = paste0(d,"T00:00:00Z", "/", d, "T23:59:59Z"),
-              limit = 500) %>% 
-    ext_query("eo:cloud_cover" < 20) %>%
-    post_request()
-})
-# merge list
-merged_items <- items_list[[1]]
-for(i in 2:length(items_list)){
-  merged_items$features <- c(merged_items$features, items_list[[i]]$features)
+get_items <- function(joined_df, bbox){
+  # grab items ON dates of interest
+  dates <- unique(joined_df$HLS_dates)
+  # get list of imagery
+  items_list <- lapply(dates, function(d) {
+    stac_search(q = s,
+                collections = HLS_col,
+                bbox = bbox,
+                datetime = paste0(d,"T00:00:00Z", "/", d, "T23:59:59Z"),
+                limit = 500) %>% 
+      ext_query("eo:cloud_cover" < 20) %>%
+      post_request()
+  })
+  
+  # merge list
+  items <- items_list[[1]]
+  for(i in 2:length(items_list)){
+    items$features <- c(items$features, items_list[[i]]$features)
+  }
+  
+  # update metadata
+  items$numberMatched <- length(items$features)
+  items$numberReturned <- length(items$features)
+  class(items) <- c("stac_item_collection", "list")
+  # manually add projection info into each STAC item before passing to gdalcubes
+  # for some reason HLS data doesn't have this automatically included?
+  for (i in seq_along(items$features)) {
+    items$features[[i]]$properties$`proj:epsg` <- 32617  # force correct projection
+  }
+  
+  return(items)
 }
-# update metadata
-merged_items$numberMatched <- length(merged_items$features)
-merged_items$numberReturned <- length(merged_items$features)
-class(merged_items) <- c("stac_item_collection", "list")
-# make new variable
-items <- merged_items
 
-# manually add projection info into each STAC item before passing to gdalcubes
-# for some reason HLS data doesn't have this automatically included?
-for (i in seq_along(items$features)) {
-  items$features[[i]]$properties$`proj:epsg` <- 32617  # force correct projection
+items <- get_items(bvr_chla_joined, bvr_box)
+
+
+get_vals <- function(HLStype, itemlist, joined_df, bbox_utm){
+  # first define cube space
+  # start/end based on dataframe
+  start_date <- paste0(joined_df$HLS_dates[1], "T00:00:00Z")
+  end_date <- paste0(joined_df$HLS_dates[length(joined_df$HLS_dates)], "T00:00:00Z")
+  # define the cube space
+  cube <- cube_view(srs ="EPSG:32617",
+                    extent = list(t0 = start_date, 
+                                  t1 = end_date,
+                                  left = bbox_utm[1], 
+                                  right = bbox_utm[3],
+                                  top = bbox_utm[4], 
+                                  bottom = bbox_utm[2]),
+                    dx = 30, # 30 m resolution
+                    dy = 30, 
+                    dt = 'P1D',
+                    aggregation = "median", 
+                    resampling = "average")
+  # get only HLSL or HLSS stac image collection
+  if(HLStype == "HLSS"){
+    hls_items <- itemlist$features[sapply(itemlist$features, function(f) f$collection == "HLSS30_2.0")]
+    # sentinel collection
+    col_S30 <- stac_image_collection(
+      hls_items,
+      asset_names = c("B02", "B03", "B04", "B8A"),
+      url_fun = function(url) paste0("/vsicurl/", url)  # helps GDAL access
+    )
+    data <- raster_cube(image_collection = col_S30, 
+                            view = cube)
+    data <- rename_bands(data_S30, B02 = "blue", B03 = "green", B04 = "red",
+                             B8A = "NIR")
+  } else {
+    hls_items <- itemlist$features[sapply(itemlist$features, function(f) f$collection == "HLSL30_2.0")]
+    # landsat collection
+    col_L30 <- stac_image_collection(
+      hls_items,
+      asset_names = c("B02", "B03", "B04", "B05"),
+      url_fun = function(url) paste0("/vsicurl/", url)  # helps GDAL access
+    )
+    data <- raster_cube(image_collection = col_L30, 
+                            view = cube)
+    data <- rename_bands(data_L30, B02 = "blue", B03 = "green", B04 = "red",
+                             B05 = "NIR")
+  }
+  # get unique lat/longs
+  points <- data.frame(unique(cbind(joined_df$Longitude, joined_df$Latitude)))
+  points <- mutate(points, FID = row_number()) # add ID for merging later
+  projcrs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0" # project
+  # make sf for extract_geom
+  points_crs <- st_as_sf(x = points,                         
+                         coords = c("X1", "X2"),
+                         crs = projcrs)
+  # extract band values at geometry points
+  band_vals <- extract_geom(data, points_crs)
+  return(band_vals)
 }
 
+test <- get_vals("HLSL", items, bvr_chla_joined, bvr_box_utm)
+test
+
+
+
+
+
+###############################################################################
+# BELOW IS NOW IN FUNCTION
+###############################################################################
 # pass to gdalcubes
 # need to separate HLSL and HLSS data since they have different band configs
 ss_items <- items$features[sapply(items$features, function(f) f$collection == "HLSS30_2.0")]
@@ -191,6 +264,9 @@ col_L30 <- stac_image_collection(
   asset_names = c("B02", "B03", "B04", "B05"),
   url_fun = function(url) paste0("/vsicurl/", url)  # helps GDAL access
 )
+
+
+
 
 # start/end based on dataframe
 start_date <- paste0(bvr_chla_joined$HLS_dates[1], "T00:00:00Z")
@@ -232,6 +308,9 @@ points_crs <- st_as_sf(x = points,
 # extract band values at geometry points
 band_vals_L <- extract_geom(data_L30, points)
 band_vals_S <- extract_geom(data_S30, points)
+################################################################################
+# ABOVE IS NOW IN FUNCTION
+###############################################################################
 band_vals <- rbind(band_vals_L, band_vals_S)
 # join with lat/long
 bvr_bandvals_joined <- left_join(band_vals, points, by = "FID")
