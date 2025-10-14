@@ -144,22 +144,9 @@ bvr_chla_joined <- left_join(bvr_chla_joined, bvr_joined,
 ################################################################################
 # next: download data and extract points of interest using gdalcubes extract_geom
 ################################################################################
-# ok maybe 
-start_date <- paste0(bvr_chla_joined$HLS_dates[1], "T00:00:00Z")
-end_date <- paste0(bvr_chla_joined$HLS_dates[38], "T00:00:00Z")
-end_date <- paste0(bvr_chla_joined$HLS_dates[length(bvr_chla_joined$HLS_dates)], "T00:00:00Z")
-# grab items within dates of interest
-items <- s %>%
-  stac_search(collections = HLS_col,
-              bbox = bvr_box,
-              datetime = paste(start_date, end_date, sep="/"),
-              limit = 500) %>%
-  ext_query("eo:cloud_cover" < 20) %>% #filter for cloud cover
-  post_request()
-items
-
+# grab items ON dates of interest
 dates <- unique(bvr_chla_joined$HLS_dates)
-
+# get list of imagery
 items_list <- lapply(dates, function(d) {
   stac_search(q = s,
               collections = HLS_col,
@@ -169,7 +156,6 @@ items_list <- lapply(dates, function(d) {
     ext_query("eo:cloud_cover" < 20) %>%
     post_request()
 })
-
 # merge list
 merged_items <- items_list[[1]]
 for(i in 2:length(items_list)){
@@ -179,9 +165,8 @@ for(i in 2:length(items_list)){
 merged_items$numberMatched <- length(merged_items$features)
 merged_items$numberReturned <- length(merged_items$features)
 class(merged_items) <- c("stac_item_collection", "list")
-
+# make new variable
 items <- merged_items
-
 
 # manually add projection info into each STAC item before passing to gdalcubes
 # for some reason HLS data doesn't have this automatically included?
@@ -207,6 +192,9 @@ col_L30 <- stac_image_collection(
   url_fun = function(url) paste0("/vsicurl/", url)  # helps GDAL access
 )
 
+# start/end based on dataframe
+start_date <- paste0(bvr_chla_joined$HLS_dates[1], "T00:00:00Z")
+end_date <- paste0(bvr_chla_joined$HLS_dates[length(bvr_chla_joined$HLS_dates)], "T00:00:00Z")
 # define the cube space
 cube <- cube_view(srs ="EPSG:32617",
                   extent = list(t0 = start_date, 
@@ -221,6 +209,7 @@ cube <- cube_view(srs ="EPSG:32617",
                   aggregation = "median", 
                   resampling = "average")
 
+# make image collections
 # HLSS
 data_S30 <- raster_cube(image_collection = col_S30, 
                         view = cube)
@@ -234,14 +223,38 @@ data_L30 <- rename_bands(data_L30, B02 = "blue", B03 = "green", B04 = "red",
 
 # get unique lat/longs
 points <- data.frame(unique(cbind(bvr_chla_joined$Longitude, bvr_chla_joined$Latitude)))
-points <- mutate(points, FID = row_number())
-projcrs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
-points <- st_as_sf(x = points,                         
+points <- mutate(points, FID = row_number()) # add ID for merging later
+projcrs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0" # project
+# make sf for extract_geom
+points_crs <- st_as_sf(x = points,                         
          coords = c("X1", "X2"),
          crs = projcrs)
-test <- extract_geom(data_L30, points)
-test
+# extract band values at geometry points
+band_vals_L <- extract_geom(data_L30, points)
+band_vals_S <- extract_geom(data_S30, points)
+band_vals <- rbind(band_vals_L, band_vals_S)
+# join with lat/long
+bvr_bandvals_joined <- left_join(band_vals, points, by = "FID")
+bvr_bandvals_joined$time <- as.Date(bvr_bandvals_joined$time)
+# join with in situ vals
+bvr_alldata <- left_join(bvr_chla_joined, bvr_bandvals_joined, 
+                         by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
+bvr_alldata <- na.omit(bvr_alldata)
+
+model <- lm(Chla_ugL ~ blue + green + red + NIR, data = bvr_alldata)
+df <- data.frame(cbind(predict(model), bvr_alldata$Chla_ugL))
+
+ggplot(df, aes(x = X1, y = X2)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_classic() +
+  labs(x = "Predicted", y = "Actual")
 
 
-with_coords <- left_join(test, points, by = "FID")
+
+
+
+
+
+
 
