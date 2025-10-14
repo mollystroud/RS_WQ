@@ -6,7 +6,7 @@
 require(pacman)
 p_load('earthdatalogin', 'rstac', 'terra', 'stars', 'ggplot2', 'tidyterra', 
        'viridis', 'EBImage', 'gdalcubes', 'tmap', 'dplyr', 'tidyverse', 'sf',
-       'fuzzyjoin')
+       'fuzzyjoin', 'patchwork')
 ################################################################################
 # the below code is designed to match up in situ chl-a data over CCR, FCR, and
 # BVR with HLS data
@@ -79,8 +79,9 @@ gdalcubes_set_gdal_config("GDAL_HTTP_COOKIEFILE", "/tmp/cookies.txt")
 gdalcubes_set_gdal_config("CPL_VSIL_CURL_USE_HEAD", "FALSE")
 gdalcubes_set_gdal_config("GDAL_DISABLE_READDIR_ON_OPEN", "YES")
 
-
+################################################################################
 # function to identify all imagery within start and end dates
+################################################################################
 get_dates <- function(bbox, dates) {
   # get start and end dates
   start_date <- paste0(dates[1], "T00:00:00Z")
@@ -102,7 +103,9 @@ ccr_hls_datetime <- get_dates(ccr_box, ccr_dates)
 fcr_hls_datetime <- get_dates(fcr_box, fcr_dates)
 bvr_hls_datetime <- get_dates(bvr_box, bvr_dates)
 
-# now fuzzy match dates with in situ dates
+################################################################################
+# function to fuzzy match dates with in situ dates
+################################################################################
 fuzzy_join_dates <- function(hls_datetime, chla_dates){
   # put into dataframe
   hls_dates <- data.frame(t(data.frame(lapply(hls_datetime, as.Date))))
@@ -142,7 +145,7 @@ bvr_chla_joined <- left_join(bvr_chla_joined, bvr_joined,
 
 
 ################################################################################
-# next: download data and extract points of interest using gdalcubes extract_geom
+# function to perform stac_search on specific dates
 ################################################################################
 get_items <- function(joined_df, bbox){
   # grab items ON dates of interest
@@ -177,14 +180,18 @@ get_items <- function(joined_df, bbox){
   return(items)
 }
 
-items <- get_items(bvr_chla_joined, bvr_box)
+items_ccr <- get_items(ccr_chla_joined, ccr_box)
+items_fcr <- get_items(fcr_chla_joined, fcr_box)
+items_bvr <- get_items(bvr_chla_joined, bvr_box)
 
-
+################################################################################
+# function to extract values HLSS or HLSL data based on lat/longs
+################################################################################
 get_vals <- function(HLStype, itemlist, joined_df, bbox_utm){
   # first define cube space
   # start/end based on dataframe
   start_date <- paste0(joined_df$HLS_dates[1], "T00:00:00Z")
-  end_date <- paste0(joined_df$HLS_dates[length(joined_df$HLS_dates)], "T00:00:00Z")
+  end_date <- paste0(joined_df[length(joined_df$HLS_dates),]$HLS_dates, "T00:00:00Z")
   # define the cube space
   cube <- cube_view(srs ="EPSG:32617",
                     extent = list(t0 = start_date, 
@@ -209,7 +216,7 @@ get_vals <- function(HLStype, itemlist, joined_df, bbox_utm){
     )
     data <- raster_cube(image_collection = col_S30, 
                             view = cube)
-    data <- rename_bands(data_S30, B02 = "blue", B03 = "green", B04 = "red",
+    data <- rename_bands(data, B02 = "blue", B03 = "green", B04 = "red",
                              B8A = "NIR")
   } else {
     hls_items <- itemlist$features[sapply(itemlist$features, function(f) f$collection == "HLSL30_2.0")]
@@ -221,7 +228,7 @@ get_vals <- function(HLStype, itemlist, joined_df, bbox_utm){
     )
     data <- raster_cube(image_collection = col_L30, 
                             view = cube)
-    data <- rename_bands(data_L30, B02 = "blue", B03 = "green", B04 = "red",
+    data <- rename_bands(data, B02 = "blue", B03 = "green", B04 = "red",
                              B05 = "NIR")
   }
   # get unique lat/longs
@@ -234,11 +241,111 @@ get_vals <- function(HLStype, itemlist, joined_df, bbox_utm){
                          crs = projcrs)
   # extract band values at geometry points
   band_vals <- extract_geom(data, points_crs)
+  band_vals <- left_join(band_vals, points, by = "FID") # add back lat/long
+  band_vals$time <- as.Date(band_vals$time) # make Date
+  
   return(band_vals)
 }
 
-test <- get_vals("HLSL", items, bvr_chla_joined, bvr_box_utm)
-test
+# ccr
+ccr_vals_HLSS <- get_vals("HLSS", items_ccr, ccr_chla_joined, ccr_box_utm)
+ccr_vals_HLSL <- get_vals("HLSL", items_ccr, ccr_chla_joined, ccr_box_utm)
+ccr_vals <- data.frame(rbind(ccr_vals_HLSS, ccr_vals_HLSL)) # join
+ccr_vals$time <- as.Date(ccr_vals$time)
+ccr_alldata <- left_join(ccr_chla_joined, ccr_vals, # join with in situ
+                         by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
+ccr_alldata <- ccr_alldata[!is.na(ccr_alldata$FID),]
+ccr_alldata <- ccr_alldata[!duplicated(ccr_alldata), ]
+
+
+# fcr
+fcr_vals_HLSS <- get_vals("HLSS", items_fcr, fcr_chla_joined, fcr_box_utm)
+fcr_vals_HLSL <- get_vals("HLSL", items_fcr, fcr_chla_joined, fcr_box_utm)
+fcr_vals <- rbind(fcr_vals_HLSS, fcr_vals_HLSL) # join
+fcr_alldata <- left_join(fcr_chla_joined, fcr_vals, # join with in situ
+                         by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
+fcr_alldata <- fcr_alldata[!is.na(fcr_alldata$FID),]
+fcr_alldata <- fcr_alldata[!duplicated(fcr_alldata), ]
+
+# bvr
+bvr_vals_HLSS <- get_vals("HLSS", items_bvr, bvr_chla_joined, bvr_box_utm)
+bvr_vals_HLSL <- get_vals("HLSL", items_bvr, bvr_chla_joined, bvr_box_utm)
+bvr_vals <- rbind(bvr_vals_HLSS, bvr_vals_HLSL) #join
+bvr_alldata <- left_join(bvr_chla_joined, bvr_vals, # join with in situ
+                         by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
+bvr_alldata <- bvr_alldata[!is.na(bvr_alldata$FID),]
+bvr_alldata <- bvr_alldata[!duplicated(bvr_alldata), ]
+
+
+
+# now model timeeee
+# CCR
+model_ccr <- lm(Chla_ugL ~ blue + green + red + NIR, data = ccr_alldata)
+model_ccr_preds <- data.frame(cbind(predict(model_ccr), ccr_alldata$Chla_ugL))
+summary(model_ccr)
+sqrt(mean(model_ccr$residuals^2))
+# plot
+ccr_plot <- ggplot(model_ccr_preds, aes(x = X1, y = X2)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_classic() +
+  labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
+       title = "Filtered Chl-a estimates, CCR") +
+  annotate("text", x = 2, y = 8, label = "R2 = 0.76, RMSE = 1.14")
+ccr_plot
+# FCR
+model_fcr <- lm(Chla_ugL ~ blue + green + red + NIR, data = fcr_alldata)
+model_fcr_preds <- data.frame(cbind(predict(model_fcr), fcr_alldata$Chla_ugL))
+summary(model_fcr)
+sqrt(mean(model_fcr$residuals^2))
+# plot
+fcr_plot <- ggplot(model_fcr_preds, aes(x = X1, y = X2)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_classic() +
+  labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
+       title = "Filtered Chl-a estimates, FCR") +
+  annotate("text", x = 5, y = 25, label = "R2 = 0.77, RMSE = 5.15")
+fcr_plot
+
+# BVR
+model_bvr <- lm(Chla_ugL ~ blue + green + red + NIR, data = bvr_alldata)
+model_bvr_preds <- data.frame(cbind(predict(model_bvr), bvr_alldata$Chla_ugL))
+summary(model_bvr)
+sqrt(mean(model_bvr$residuals^2))
+# plot
+bvr_plot <- ggplot(model_bvr_preds, aes(x = X1, y = X2)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_classic() +
+  labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
+       title = "Filtered Chl-a estimates, BVR") +
+  annotate("text", x = 2.5, y = 12.5, label = "R2 = 0.89, RMSE = 1.6")
+bvr_plot
+
+ccr_plot + fcr_plot + bvr_plot
+
+#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -303,36 +410,23 @@ points <- mutate(points, FID = row_number()) # add ID for merging later
 projcrs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0" # project
 # make sf for extract_geom
 points_crs <- st_as_sf(x = points,                         
-         coords = c("X1", "X2"),
-         crs = projcrs)
+                       coords = c("X1", "X2"),
+                       crs = projcrs)
 # extract band values at geometry points
 band_vals_L <- extract_geom(data_L30, points)
 band_vals_S <- extract_geom(data_S30, points)
-################################################################################
-# ABOVE IS NOW IN FUNCTION
-###############################################################################
-band_vals <- rbind(band_vals_L, band_vals_S)
+
 # join with lat/long
 bvr_bandvals_joined <- left_join(band_vals, points, by = "FID")
 bvr_bandvals_joined$time <- as.Date(bvr_bandvals_joined$time)
+
 # join with in situ vals
 bvr_alldata <- left_join(bvr_chla_joined, bvr_bandvals_joined, 
                          by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
 bvr_alldata <- na.omit(bvr_alldata)
-
-model <- lm(Chla_ugL ~ blue + green + red + NIR, data = bvr_alldata)
-df <- data.frame(cbind(predict(model), bvr_alldata$Chla_ugL))
-
-ggplot(df, aes(x = X1, y = X2)) +
-  geom_point() +
-  geom_abline(slope = 1, intercept = 0) +
-  theme_classic() +
-  labs(x = "Predicted", y = "Actual")
-
-
-
-
-
+################################################################################
+# ABOVE IS NOW IN FUNCTION
+###############################################################################
 
 
 
