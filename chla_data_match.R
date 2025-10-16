@@ -12,12 +12,14 @@ p_load('earthdatalogin', 'rstac', 'terra', 'stars', 'ggplot2', 'tidyterra',
 # BVR with HLS data
 ################################################################################
 # read in filtered chl-a data from reservoirs
+################################################################################
 chla <- read_csv("filt-chla_2014_2024.csv")
 # only surface measurements
 chla <- chla[chla$Depth_m <= 0.1,]
 # match with lat/long
 sitelocs <- read_csv("site_descriptions.csv")
 chla <- left_join(chla, sitelocs[2:5], by = "Site")
+
 # only ccr, bvr, fcr
 chla_ccr <- chla[chla$Reservoir == "CCR",]
 chla_fcr <- chla[chla$Reservoir == "FCR",]
@@ -26,6 +28,20 @@ chla_bvr <- chla[chla$Reservoir == "BVR",]
 ccr_dates <- unique(as.Date(chla_ccr$DateTime))
 fcr_dates <- unique(as.Date(chla_fcr$DateTime))
 bvr_dates <- unique(as.Date(chla_bvr$DateTime))
+################################################################################
+# or, EXO chla
+################################################################################
+chla_ccr <- read_csv("ccre-waterquality_2021_2024.csv")
+chla_ccr <- chla[!is.na(chla$EXOChla_ugL_1),] %>%
+  select(DateTime, EXOChla_ugL_1) 
+# average over each date
+chla_ccr$DateTime <- as.Date(chla_ccr$DateTime)
+chla_ccr <- chla_ccr %>%
+  group_by(DateTime) %>%
+  summarize(mean_chla = mean(EXOChla_ugL_1)) %>%
+  mutate(Latitude = 37.3697, Longitude =-79.958)
+ccr_dates <- unique(as.Date(chla_ccr$DateTime))
+
 
 # define stac url
 s = stac("https://cmr.earthdata.nasa.gov/stac/LPCLOUD/")
@@ -125,6 +141,8 @@ fuzzy_join_dates <- function(hls_datetime, chla_dates){
 ccr_joined <- fuzzy_join_dates(ccr_hls_datetime, ccr_dates)
 fcr_joined <- fuzzy_join_dates(fcr_hls_datetime, fcr_dates)
 bvr_joined <- fuzzy_join_dates(bvr_hls_datetime, bvr_dates)
+# for EXO data
+ccr_joined <- ccr_joined[ccr_joined$chla_dates == ccr_joined$HLS_dates,]
 
 # now join back with full chla data. possibly make this a function or add to above function
 # ccr
@@ -256,7 +274,7 @@ ccr_alldata <- left_join(ccr_chla_joined, ccr_vals, # join with in situ
                          by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
 ccr_alldata <- ccr_alldata[!is.na(ccr_alldata$FID),]
 ccr_alldata <- ccr_alldata[!duplicated(ccr_alldata), ]
-
+write_csv(ccr_alldata, "EXO_chla_ccr_matchups.csv")
 
 # fcr
 fcr_vals_HLSS <- get_vals("HLSS", items_fcr, fcr_chla_joined, fcr_box_utm)
@@ -266,6 +284,7 @@ fcr_alldata <- left_join(fcr_chla_joined, fcr_vals, # join with in situ
                          by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
 fcr_alldata <- fcr_alldata[!is.na(fcr_alldata$FID),]
 fcr_alldata <- fcr_alldata[!duplicated(fcr_alldata), ]
+write_csv(fcr_alldata, "filtered_chla_fcr_matchups.csv")
 
 # bvr
 bvr_vals_HLSS <- get_vals("HLSS", items_bvr, bvr_chla_joined, bvr_box_utm)
@@ -275,23 +294,26 @@ bvr_alldata <- left_join(bvr_chla_joined, bvr_vals, # join with in situ
                          by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
 bvr_alldata <- bvr_alldata[!is.na(bvr_alldata$FID),]
 bvr_alldata <- bvr_alldata[!duplicated(bvr_alldata), ]
+write_csv(bvr_alldata, "filtered_chla_bvr_matchups.csv")
 
 
 
-# now model timeeee
+# now model time
 # CCR
-model_ccr <- lm(Chla_ugL ~ blue + green + red + NIR, data = ccr_alldata)
-model_ccr_preds <- data.frame(cbind(predict(model_ccr), ccr_alldata$Chla_ugL))
+model_ccr <- lm((mean_chla^2) ~ blue + green + red + NIR, data = ccr_alldata)
+model_ccr_preds <- data.frame(cbind(predict(model_ccr), ccr_alldata$mean_chla))
 summary(model_ccr)
 sqrt(mean(model_ccr$residuals^2))
+model_ccr <- loess(mean_chla ~ red + NIR, data = ccr_alldata)
+model_ccr_preds <- data.frame(cbind(predict(model_ccr), ccr_alldata$mean_chla))
 # plot
 ccr_plot <- ggplot(model_ccr_preds, aes(x = X1, y = X2)) +
   geom_point() +
   geom_abline(slope = 1, intercept = 0) +
   theme_classic() +
   labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
-       title = "Filtered Chl-a estimates, CCR") +
-  annotate("text", x = 2, y = 8, label = "R2 = 0.76, RMSE = 1.14")
+       title = "Filtered Chl-a estimates, CCR") #+
+  #annotate("text", x = 2, y = 8, label = "R2 = 0.76, RMSE = 1.14")
 ccr_plot
 # FCR
 model_fcr <- lm(Chla_ugL ~ blue + green + red + NIR, data = fcr_alldata)
