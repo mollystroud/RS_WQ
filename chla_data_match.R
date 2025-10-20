@@ -31,6 +31,7 @@ bvr_dates <- unique(as.Date(chla_bvr$DateTime))
 ################################################################################
 # or, EXO chla
 ################################################################################
+# CCR
 chla_ccr <- read_csv("ccre-waterquality_2021_2024.csv")
 chla_ccr <- chla[!is.na(chla$EXOChla_ugL_1),] %>%
   select(DateTime, EXOChla_ugL_1) 
@@ -40,8 +41,32 @@ chla_ccr <- chla_ccr %>%
   group_by(DateTime) %>%
   summarize(mean_chla = mean(EXOChla_ugL_1)) %>%
   mutate(Latitude = 37.3697, Longitude =-79.958)
+chla_ccr <- chla_ccr[!is.na(chla_ccr$mean_chla),]
 ccr_dates <- unique(as.Date(chla_ccr$DateTime))
-
+# FCR
+chla_fcr <- read_csv("fcre-waterquality_2018_2024.csv")
+chla_fcr <- chla_fcr[!is.na(chla_fcr$EXOChla_ugL_1),] %>%
+  select(DateTime, EXOChla_ugL_1) 
+# average over each date
+chla_fcr$DateTime <- as.Date(chla_fcr$DateTime)
+chla_fcr <- chla_fcr %>%
+  group_by(DateTime) %>%
+  summarize(mean_chla = mean(EXOChla_ugL_1)) %>%
+  mutate(Latitude = 37.30325, Longitude =-79.8373)
+chla_fcr <- chla_fcr[!is.na(chla_fcr$mean_chla),]
+fcr_dates <- unique(as.Date(chla_fcr$DateTime))
+# BVR
+chla_bvr <- read_csv("bvre-waterquality_2020_2024.csv")
+chla_bvr <- chla_bvr[!is.na(chla_bvr$EXOChla_ugL_1.5),] %>%
+  select(DateTime, EXOChla_ugL_1.5) 
+# average over each date
+chla_bvr$DateTime <- as.Date(chla_bvr$DateTime)
+chla_bvr <- chla_bvr %>%
+  group_by(DateTime) %>%
+  summarize(mean_chla = mean(EXOChla_ugL_1.5)) %>%
+  mutate(Latitude = 37.31288, Longitude =-79.8159)
+chla_bvr <- chla_bvr[!is.na(chla_bvr$mean_chla),]
+bvr_dates <- unique(as.Date(chla_bvr$DateTime))
 
 # define stac url
 s = stac("https://cmr.earthdata.nasa.gov/stac/LPCLOUD/")
@@ -143,6 +168,10 @@ fcr_joined <- fuzzy_join_dates(fcr_hls_datetime, fcr_dates)
 bvr_joined <- fuzzy_join_dates(bvr_hls_datetime, bvr_dates)
 # for EXO data
 ccr_joined <- ccr_joined[ccr_joined$chla_dates == ccr_joined$HLS_dates,]
+fcr_joined <- fcr_joined[fcr_joined$chla_dates == fcr_joined$HLS_dates,]
+bvr_joined <- bvr_joined[bvr_joined$chla_dates == bvr_joined$HLS_dates,]
+
+
 
 # now join back with full chla data. possibly make this a function or add to above function
 # ccr
@@ -272,9 +301,9 @@ ccr_vals <- data.frame(rbind(ccr_vals_HLSS, ccr_vals_HLSL)) # join
 ccr_vals$time <- as.Date(ccr_vals$time)
 ccr_alldata <- left_join(ccr_chla_joined, ccr_vals, # join with in situ
                          by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
-ccr_alldata <- ccr_alldata[!is.na(ccr_alldata$FID),]
-ccr_alldata <- ccr_alldata[!duplicated(ccr_alldata), ]
-write_csv(ccr_alldata, "EXO_chla_ccr_matchups.csv")
+ccr_alldata <- ccr_alldata[!is.na(ccr_alldata$FID),] # remove nas
+ccr_alldata <- ccr_alldata[!duplicated(ccr_alldata), ] # remove duplicates
+#write_csv(ccr_alldata, "EXO_chla_ccr_matchups.csv")
 
 # fcr
 fcr_vals_HLSS <- get_vals("HLSS", items_fcr, fcr_chla_joined, fcr_box_utm)
@@ -284,7 +313,7 @@ fcr_alldata <- left_join(fcr_chla_joined, fcr_vals, # join with in situ
                          by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
 fcr_alldata <- fcr_alldata[!is.na(fcr_alldata$FID),]
 fcr_alldata <- fcr_alldata[!duplicated(fcr_alldata), ]
-write_csv(fcr_alldata, "filtered_chla_fcr_matchups.csv")
+#write_csv(fcr_alldata, "EXO_chla_fcr_matchups.csv")
 
 # bvr
 bvr_vals_HLSS <- get_vals("HLSS", items_bvr, bvr_chla_joined, bvr_box_utm)
@@ -294,27 +323,123 @@ bvr_alldata <- left_join(bvr_chla_joined, bvr_vals, # join with in situ
                          by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
 bvr_alldata <- bvr_alldata[!is.na(bvr_alldata$FID),]
 bvr_alldata <- bvr_alldata[!duplicated(bvr_alldata), ]
-write_csv(bvr_alldata, "filtered_chla_bvr_matchups.csv")
+write_csv(bvr_alldata, "EXO_chla_bvr_matchups.csv")
 
 
 
 # now model time
+ccr_alldata <- read_csv("EXO_chla_ccr_matchups.csv")
+# remove data with weird vals
+ccr_alldata <- ccr_alldata[ccr_alldata$blue > 0 & ccr_alldata$green > 0 &
+                             ccr_alldata$red > 0 & ccr_alldata$NIR > 0,]
 # CCR
-model_ccr <- lm((mean_chla^2) ~ blue + green + red + NIR, data = ccr_alldata)
-model_ccr_preds <- data.frame(cbind(predict(model_ccr), ccr_alldata$mean_chla))
-summary(model_ccr)
-sqrt(mean(model_ccr$residuals^2))
-model_ccr <- loess(mean_chla ~ red + NIR, data = ccr_alldata)
-model_ccr_preds <- data.frame(cbind(predict(model_ccr), ccr_alldata$mean_chla))
+
+# LOOCV TEST
+# Initialize variables to store RMSE values and actual vs predicted values
+rmse <- numeric()
+actual_vs_predicted <- data.frame(Actual = numeric(), Predicted = numeric())
+
+# Perform Leave-One-Out Cross Validation
+for (i in 1:nrow(bvr_alldata)) {
+  # Exclude the ith row
+  test_data <- bvr_alldata[i, ]
+  train_data <- bvr_alldata[-i, ]
+  
+  # Train the model
+  model <- lm(Chla_ugL ~ green + blue + red + NIR, data = train_data)
+  
+  # Make predictions on the test data
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse[i] <- sqrt(mean((test_data$Chla_ugL - predictions)^2))
+  
+  # Store actual vs predicted values
+  actual_vs_predicted <- rbind(actual_vs_predicted, data.frame(Actual = test_data$Chla_ugL, Predicted = predictions))
+}
+
+# Average RMSE across all folds
+average_rmse <- round(mean(rmse), 2)
+actual_vs_predicted %>%
+  mutate(rmse = sqrt((Actual - Predicted)^2))
+
+
+# GAM
+library(mgcv)
+ccr_alldata$log_chl <- log(ccr_alldata$mean_chla + 0.01)  # avoid zeros
+
+# Helper function to fit GAM with specified k
+fit_gam <- function(k_band) {
+  gam(log_chl ~ 
+        s(red,  k = k_band) +
+        s(green,  k = k_band) +
+        s(blue,  k = k_band) +
+        s(NIR, k = k_band),
+      data = ccr_alldata,
+      method = "REML")
+}
+
+
+# Try a few complexity settings
+gam1 <- fit_gam(k_band = 4)
+gam2 <- fit_gam(k_band = 6)
+gam3 <- fit_gam(k_band = 8)
+gam4 <- fit_gam(k_band = 10)
+gam5 <- fit_gam(k_band = 12)
+
+# Compare using AIC
+AIC(gam1, gam2, gam3, gam4, gam5)
+# Check smoothness diagnostics
+# gam.check(gam4)
+# Summary of best model
+summary(gam4)
+
+ccr_alldata$pred_chl <- exp(predict(gam4, ccr_alldata)) - 0.01
+# Performance metrics
+rmse <- sqrt(mean((ccr_alldata$pred_chl - ccr_alldata$mean_chla)^2))
+r2 <- cor(ccr_alldata$pred_chl, ccr_alldata$mean_chla)^2
+
+cat("RMSE:", rmse, "\nR2:", r2, "\n")
+
+par(mfrow = c(2,3))
+plot(gam2, shade=TRUE)
+
 # plot
-ccr_plot <- ggplot(model_ccr_preds, aes(x = X1, y = X2)) +
+ccr_plot <- ggplot(ccr_alldata, aes(x = pred_chl, y = mean_chla)) +
   geom_point() +
   geom_abline(slope = 1, intercept = 0) +
   theme_classic() +
   labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
-       title = "Filtered Chl-a estimates, CCR") #+
-  #annotate("text", x = 2, y = 8, label = "R2 = 0.76, RMSE = 1.14")
+       title = "EXO Chl-a estimates, CCR") #+
+#annotate("text", x = 2, y = 8, label = "R2 = 0.76, RMSE = 1.14")
 ccr_plot
+
+# NOW TRAIN/TEST
+
+ccr_alldata <- ccr_alldata[order(ccr_alldata$DateTime), ]  # sort by time
+
+train_idx <- 1:floor(0.7 * nrow(ccr_alldata))
+test_idx <- (floor(0.7 * nrow(ccr_alldata)) + 1):nrow(df)
+
+train <- ccr_alldata[train_idx, ]
+test  <- ccr_alldata[test_idx, ]
+
+# Fit GAM
+gam_fit <- gam(log_chl ~ s(red) + s(green) + s(blue) + s(NIR), data=train, method="REML")
+
+# Predict on held-out set
+test$pred <- exp(predict(gam_fit, newdata=test)) - 0.01
+
+# Evaluate
+rmse <- sqrt(mean((test$pred - test$mean_chla)^2))
+r2   <- cor(test$pred, test$mean_chla^2)
+cat("RMSE:", rmse, " R2:", r2, "\n")
+ggplot(test, aes(x = pred, y = mean_chla)) +
+  geom_point() +
+  theme_classic() +
+  geom_abline(slope = 1, intercept = 0)
+
+
 # FCR
 model_fcr <- lm(Chla_ugL ~ blue + green + red + NIR, data = fcr_alldata)
 model_fcr_preds <- data.frame(cbind(predict(model_fcr), fcr_alldata$Chla_ugL))
@@ -347,108 +472,10 @@ bvr_plot
 
 ccr_plot + fcr_plot + bvr_plot
 
+
+
+
 #
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-###############################################################################
-# BELOW IS NOW IN FUNCTION
-###############################################################################
-# pass to gdalcubes
-# need to separate HLSL and HLSS data since they have different band configs
-ss_items <- items$features[sapply(items$features, function(f) f$collection == "HLSS30_2.0")]
-sl_items <- items$features[sapply(items$features, function(f) f$collection == "HLSL30_2.0")]
-
-# sentinel collection
-col_S30 <- stac_image_collection(
-  ss_items,
-  asset_names = c("B02", "B03", "B04", "B8A"),
-  url_fun = function(url) paste0("/vsicurl/", url)  # helps GDAL access
-)
-# landsat collection
-col_L30 <- stac_image_collection(
-  sl_items,
-  asset_names = c("B02", "B03", "B04", "B05"),
-  url_fun = function(url) paste0("/vsicurl/", url)  # helps GDAL access
-)
-
-
-
-
-# start/end based on dataframe
-start_date <- paste0(bvr_chla_joined$HLS_dates[1], "T00:00:00Z")
-end_date <- paste0(bvr_chla_joined$HLS_dates[length(bvr_chla_joined$HLS_dates)], "T00:00:00Z")
-# define the cube space
-cube <- cube_view(srs ="EPSG:32617",
-                  extent = list(t0 = start_date, 
-                                t1 = end_date,
-                                left = bvr_box_utm[1], 
-                                right = bvr_box_utm[3],
-                                top = bvr_box_utm[4], 
-                                bottom = bvr_box_utm[2]),
-                  dx = 30, # 30 m resolution
-                  dy = 30, 
-                  dt = 'P1D',
-                  aggregation = "median", 
-                  resampling = "average")
-
-# make image collections
-# HLSS
-data_S30 <- raster_cube(image_collection = col_S30, 
-                        view = cube)
-data_S30 <- rename_bands(data_S30, B02 = "blue", B03 = "green", B04 = "red",
-                         B8A = "NIR")
-#HLSL
-data_L30 <- raster_cube(image_collection = col_L30, 
-                        view = cube)
-data_L30 <- rename_bands(data_L30, B02 = "blue", B03 = "green", B04 = "red",
-                         B05 = "NIR")
-
-# get unique lat/longs
-points <- data.frame(unique(cbind(bvr_chla_joined$Longitude, bvr_chla_joined$Latitude)))
-points <- mutate(points, FID = row_number()) # add ID for merging later
-projcrs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0" # project
-# make sf for extract_geom
-points_crs <- st_as_sf(x = points,                         
-                       coords = c("X1", "X2"),
-                       crs = projcrs)
-# extract band values at geometry points
-band_vals_L <- extract_geom(data_L30, points)
-band_vals_S <- extract_geom(data_S30, points)
-
-# join with lat/long
-bvr_bandvals_joined <- left_join(band_vals, points, by = "FID")
-bvr_bandvals_joined$time <- as.Date(bvr_bandvals_joined$time)
-
-# join with in situ vals
-bvr_alldata <- left_join(bvr_chla_joined, bvr_bandvals_joined, 
-                         by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
-bvr_alldata <- na.omit(bvr_alldata)
-################################################################################
-# ABOVE IS NOW IN FUNCTION
-###############################################################################
 
 
 
