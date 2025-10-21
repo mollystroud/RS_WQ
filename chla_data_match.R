@@ -33,7 +33,7 @@ bvr_dates <- unique(as.Date(chla_bvr$DateTime))
 ################################################################################
 # CCR
 chla_ccr <- read_csv("ccre-waterquality_2021_2024.csv")
-chla_ccr <- chla[!is.na(chla$EXOChla_ugL_1),] %>%
+chla_ccr <- chla_ccr[!is.na(chla_ccr$EXOChla_ugL_1),] %>%
   select(DateTime, EXOChla_ugL_1) 
 # average over each date
 chla_ccr$DateTime <- as.Date(chla_ccr$DateTime)

@@ -3,25 +3,121 @@
 ################################################################################
 # load in packages
 require(pacman)
-p_load('mgsv', 'ggplot2', 'tidyverse', 'dplyr')
+p_load('mgcv', 'ggplot2', 'tidyverse', 'dplyr', 'patchwork')
 
 ################################################################################
 # the below code is designed to use the match-ups from chla_data_match.R to
 # create accurate water quality estimation algorithms
+# and, to test how surface chla measurements compare to measurements at depth
 ################################################################################
 
+# quick comparison of filtered and EXO to see relationship
+chla <- read_csv("filt-chla_2014_2024.csv")
+# only surface measurements
+chla <- chla[chla$Depth_m <= 0.1,]
+# match with lat/long
+sitelocs <- read_csv("site_descriptions.csv")
+chla <- left_join(chla, sitelocs[2:5], by = "Site")
 
+# only ccr, bvr, fcr
+filtered_chla_ccr <- chla[chla$Reservoir == "CCR",] %>%
+  filter(Site == 50)
+filtered_chla_ccr$DateTime <- as.Date(filtered_chla_ccr$DateTime)
+filtered_chla_fcr <- chla[chla$Reservoir == "FCR",] %>%
+  filter(Site == 50)
+filtered_chla_fcr$DateTime <- as.Date(filtered_chla_fcr$DateTime)
+filtered_chla_bvr <- chla[chla$Reservoir == "BVR",] %>%
+  filter(Site == 50)
+filtered_chla_bvr$DateTime <- as.Date(filtered_chla_bvr$DateTime)
 
+# within filtered
+test <- filtered_chla_ccr %>%
+  group_by(DateTime, Depth_m) %>%
+  summarize(mean_chla = mean(Chla_ugL))
+ccr_comp <- ggplot() +
+  geom_line(data = test[#test$DateTime < "2019-01-01" & 
+                          #test$DateTime > "2015-01-01" &
+                          test$Depth_m <= 6,], 
+             aes(x = DateTime, y = mean_chla, color = Depth_m, group = Depth_m),
+            linewidth = 1) +
+  theme_classic() +
+  labs(x = element_blank(), y = 'Chl-a (ugL)', title = 'BVR')
+ccr_comp
+ccr_comp + fcr_comp + bvr_comp
 
+# other dfs are from chla_data_match.R
+matched_ccr <- inner_join(filtered_chla_ccr, chla_ccr, by = "DateTime")
+matched_fcr <- inner_join(filtered_chla_fcr, chla_fcr, by = "DateTime")
+matched_bvr <- inner_join(filtered_chla_bvr, chla_bvr, by = "DateTime") #none
 
-# now model time
-ccr_alldata <- read_csv("EXO_chla_ccr_matchups.csv")
-# remove data with weird vals
-ccr_alldata <- ccr_alldata[ccr_alldata$blue > 0 & ccr_alldata$green > 0 &
-                             ccr_alldata$red > 0 & ccr_alldata$NIR > 0,]
+ccr_matchup <- ggplot(matched_ccr, aes(x = Chla_ugL, y = mean_chla)) +
+  geom_point() + 
+  theme_classic() +
+  labs(x = 'Filtered Chla', y = 'EXO Chla', titled = 'CCR')
+fcr_matchup <- ggplot(matched_fcr, aes(x = Chla_ugL, y = mean_chla)) +
+  geom_point() + 
+  theme_classic() +
+  labs(x = 'Filtered Chla', y = 'EXO Chla', title = 'FCR')
+ccr_matchup + fcr_matchup
+
+################################################################################
+# create simple linear estimation algorithm with filtered chla
+################################################################################
 # CCR
+ccr_alldata <- read_csv("filtered_chla_ccr_matchups.csv") # read in data
+# create model 
+model_ccr <- lm(Chla_ugL ~ blue + green + red + NIR, data = ccr_alldata)
+model_ccr_preds <- data.frame(cbind(predict(model_ccr), ccr_alldata$Chla_ugL))
+summary(model_ccr) # summary stats
+sqrt(mean(model_ccr$residuals^2)) # rmse
+# plot
+ccr_plot <- ggplot(model_ccr_preds, aes(x = X1, y = X2)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_classic() +
+  labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
+       title = "Filtered Chl-a estimates, CCR") +
+  annotate("text", x = 2, y = 7, label = "R2 = 0.76, RMSE = 1.14")
+ccr_plot
 
-# LOOCV TEST
+# FCR
+fcr_alldata <- read_csv("filtered_chla_fcr_matchups.csv") # read in data
+# create model
+model_fcr <- lm(Chla_ugL ~ blue + green + red + NIR, data = fcr_alldata)
+model_fcr_preds <- data.frame(cbind(predict(model_fcr), fcr_alldata$Chla_ugL))
+summary(model_fcr) # summary stats
+sqrt(mean(model_fcr$residuals^2)) # rmse
+# plot
+fcr_plot <- ggplot(model_fcr_preds, aes(x = X1, y = X2)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_classic() +
+  labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
+       title = "Filtered Chl-a estimates, FCR") +
+  annotate("text", x = 5, y = 25, label = "R2 = 0.77, RMSE = 5.15")
+fcr_plot
+
+# BVR
+bvr_alldata <- read_csv("filtered_chla_bvr_matchups.csv") # read in data
+# create model
+model_bvr <- lm(Chla_ugL ~ blue + green + red + NIR, data = bvr_alldata)
+model_bvr_preds <- data.frame(cbind(predict(model_bvr), bvr_alldata$Chla_ugL))
+summary(model_bvr) # summary stats
+sqrt(mean(model_bvr$residuals^2)) # rmse
+# plot
+bvr_plot <- ggplot(model_bvr_preds, aes(x = X1, y = X2)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_classic() +
+  labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
+       title = "Filtered Chl-a estimates, BVR") +
+  annotate("text", x = 2.5, y = 12.5, label = "R2 = 0.89, RMSE = 1.6")
+bvr_plot
+
+ccr_plot + fcr_plot + bvr_plot
+
+
+# LOOCV TEST if interested in seeing
 # Initialize variables to store RMSE values and actual vs predicted values
 rmse <- numeric()
 actual_vs_predicted <- data.frame(Actual = numeric(), Predicted = numeric())
@@ -51,8 +147,22 @@ actual_vs_predicted %>%
   mutate(rmse = sqrt((Actual - Predicted)^2))
 
 
+
+################################################################################
+# test out using generalized additive model (GAM) for EXO data
+################################################################################
+# now model time
+ccr_EXO <- read_csv("EXO_chla_ccr_matchups.csv")
+fcr_EXO <- read_csv("EXO_chla_fcr_matchups.csv")
+bvr_EXO <- read_csv("EXO_chla_bvr_matchups.csv")
+
+# remove data with weird vals (negatives likely caused by clouds)
+ccr_EXO <- ccr_EXO[ccr_EXO$blue > 0 & ccr_EXO$green > 0 &
+                     ccr_EXO$red > 0 & ccr_EXO$NIR > 0,]
+
+
 # GAM
-ccr_alldata$log_chl <- log(ccr_alldata$mean_chla + 0.01)  # avoid zeros
+ccr_EXO$log_chl <- log(ccr_EXO$mean_chla + 0.01)  # avoid zeros
 
 # Helper function to fit GAM with specified k
 fit_gam <- function(k_band) {
@@ -61,10 +171,9 @@ fit_gam <- function(k_band) {
         s(green,  k = k_band) +
         s(blue,  k = k_band) +
         s(NIR, k = k_band),
-      data = ccr_alldata,
+      data = ccr_EXO,
       method = "REML")
 }
-
 
 # Try a few complexity settings
 gam1 <- fit_gam(k_band = 4)
@@ -80,15 +189,15 @@ AIC(gam1, gam2, gam3, gam4, gam5)
 # Summary of best model
 summary(gam4)
 
-ccr_alldata$pred_chl <- exp(predict(gam4, ccr_alldata)) - 0.01
+ccr_EXO$pred_chl <- exp(predict(gam4, ccr_EXO)) - 0.01
 # Performance metrics
-rmse <- sqrt(mean((ccr_alldata$pred_chl - ccr_alldata$mean_chla)^2))
-r2 <- cor(ccr_alldata$pred_chl, ccr_alldata$mean_chla)^2
+rmse <- sqrt(mean((ccr_EXO$pred_chl - ccr_EXO$mean_chla)^2))
+r2 <- cor(ccr_EXO$pred_chl, ccr_EXO$mean_chla)^2
 
 cat("RMSE:", rmse, "\nR2:", r2, "\n")
 
 # plot
-ccr_plot <- ggplot(ccr_alldata, aes(x = pred_chl, y = mean_chla)) +
+ccr_plot <- ggplot(ccr_EXO, aes(x = pred_chl, y = mean_chla)) +
   geom_point() +
   geom_abline(slope = 1, intercept = 0) +
   theme_classic() +
@@ -99,13 +208,13 @@ ccr_plot
 
 # NOW TRAIN/TEST
 
-ccr_alldata <- ccr_alldata[order(ccr_alldata$DateTime), ]  # sort by time
+ccr_EXO <- ccr_EXO[order(ccr_EXO$DateTime), ]  # sort by time
 
-train_idx <- 1:floor(0.7 * nrow(ccr_alldata))
-test_idx <- (floor(0.7 * nrow(ccr_alldata)) + 1):nrow(df)
+train_idx <- 1:floor(0.7 * nrow(ccr_EXO))
+test_idx <- (floor(0.7 * nrow(ccr_EXO)) + 1):nrow(df)
 
-train <- ccr_alldata[train_idx, ]
-test  <- ccr_alldata[test_idx, ]
+train <- ccr_EXO[train_idx, ]
+test  <- ccr_EXO[test_idx, ]
 
 # Fit GAM
 gam_fit <- gam(log_chl ~ s(red) + s(green) + s(blue) + s(NIR), data=train, method="REML")
@@ -123,42 +232,9 @@ ggplot(test, aes(x = pred, y = mean_chla)) +
   geom_abline(slope = 1, intercept = 0)
 
 
-# FCR
-model_fcr <- lm(Chla_ugL ~ blue + green + red + NIR, data = fcr_alldata)
-model_fcr_preds <- data.frame(cbind(predict(model_fcr), fcr_alldata$Chla_ugL))
-summary(model_fcr)
-sqrt(mean(model_fcr$residuals^2))
-# plot
-fcr_plot <- ggplot(model_fcr_preds, aes(x = X1, y = X2)) +
-  geom_point() +
-  geom_abline(slope = 1, intercept = 0) +
-  theme_classic() +
-  labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
-       title = "Filtered Chl-a estimates, FCR") +
-  annotate("text", x = 5, y = 25, label = "R2 = 0.77, RMSE = 5.15")
-fcr_plot
-
-# BVR
-model_bvr <- lm(Chla_ugL ~ blue + green + red + NIR, data = bvr_alldata)
-model_bvr_preds <- data.frame(cbind(predict(model_bvr), bvr_alldata$Chla_ugL))
-summary(model_bvr)
-sqrt(mean(model_bvr$residuals^2))
-# plot
-bvr_plot <- ggplot(model_bvr_preds, aes(x = X1, y = X2)) +
-  geom_point() +
-  geom_abline(slope = 1, intercept = 0) +
-  theme_classic() +
-  labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
-       title = "Filtered Chl-a estimates, BVR") +
-  annotate("text", x = 2.5, y = 12.5, label = "R2 = 0.89, RMSE = 1.6")
-bvr_plot
-
-ccr_plot + fcr_plot + bvr_plot
 
 
 
-
-#
 
 
 
