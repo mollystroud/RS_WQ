@@ -55,7 +55,7 @@ ccr_box_utm <- sf::st_bbox(
                                              crs = "EPSG:4326")), "EPSG:32617")
 )
 
-# set date of interest (will need to change this to update every day)
+# set date of interest
 start_date <- "2025-09-01T00:00:00Z"
 end_date <- "2025-10-30T00:00:00Z"
 
@@ -69,7 +69,7 @@ gdalcubes_set_gdal_config("GDAL_DISABLE_READDIR_ON_OPEN", "YES")
 # grab items within dates of interest
 items <- s %>%
   stac_search(collections = HLS_col,
-              bbox = ccr_box,
+              bbox = bvr_box,
               datetime = paste(start_date, end_date, sep="/"),
               limit = 100) %>%
   ext_query("eo:cloud_cover" < 20) %>% #filter for cloud cover
@@ -104,10 +104,10 @@ col_L30 <- stac_image_collection(
 cube <- cube_view(srs ="EPSG:32617",
                   extent = list(t0 = start_date, 
                                 t1 = end_date,
-                                left = ccr_box_utm[1], 
-                                right = ccr_box_utm[3],
-                                top = ccr_box_utm[4], 
-                                bottom = ccr_box_utm[2]),
+                                left = bvr_box_utm[1], 
+                                right = bvr_box_utm[3],
+                                top = bvr_box_utm[4], 
+                                bottom = bvr_box_utm[2]),
                   dx = 30, # 30 m resolution
                   dy = 30, 
                   dt = "P1D",
@@ -242,18 +242,29 @@ df <- df[df$red > 0 & df$green > 0 & df$blue > 0 & df$NIR > 0,]
 df <- na.omit(df)
 
 
-df$chla_pred <- exp(predict(gam_fit, newdata=df[4:7])) - 0.01
-df$chla_pred_lm <- predict(model_ccr, df[4:7])
+#df$chla_pred <- exp(predict(gam_fit, newdata=df[4:7])) - 0.01
+df$chla_pred_lm <- predict(model_bvr, df[4:7])
 
 chla_stars <- st_as_stars(df, dims = c("x", "y", "time"), values = "chla_pred")
 # viz
 ggplot() +
-  geom_stars(data = chla_stars, aes(fill = chla_pred)) +
+  geom_stars(data = chla_stars, aes(fill = chla_pred_lm)) +
   facet_wrap(~time, ncol = 4) +
   scale_fill_viridis_c(
     option = "viridis",
-    na.value = "white",
-    trans = 'log') + # make NA cells white instead of gray
+    na.value = "white") + #,
+    #trans = 'log') + # make NA cells white instead of gray
     theme_void()
 
+
+# get mean chl-a values
+# conver to df
+df <- as.data.frame(chla_stars, long = TRUE)
+
+# compute mean for each date
+mean_by_date <- df %>%
+  group_by(time) %>%
+  summarise(mean_value = mean(chla_pred_lm, na.rm = TRUE))
+# output
+mean_by_date
 
