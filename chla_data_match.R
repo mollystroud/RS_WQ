@@ -14,11 +14,14 @@ p_load('earthdatalogin', 'rstac', 'terra', 'stars', 'ggplot2', 'tidyterra',
 # read in filtered chl-a data from reservoirs
 ################################################################################
 chla <- read_csv("filt-chla_2014_2024.csv")
+# new filtered chla 2025
+chla_2025 <- read_csv("https://raw.githubusercontent.com/CareyLabVT/Reservoirs/master/Data/DataNotYetUploadedToEDI/Raw_chla/Filt_chla_L1.csv")
+chla <- data.frame(rbind(chla, chla_2025))
 # only surface measurements
 chla <- chla[chla$Depth_m <= 0.1,]
 # match with lat/long
 sitelocs <- read_csv("site_descriptions.csv")
-chla <- left_join(chla, sitelocs[2:5], by = "Site")
+chla <- left_join(chla, sitelocs, by = c("Reservoir" = "Reservoir", "Site" = "Site"))
 
 # only ccr, bvr, fcr
 chla_ccr <- chla[chla$Reservoir == "CCR",]
@@ -29,7 +32,7 @@ ccr_dates <- unique(as.Date(chla_ccr$DateTime))
 fcr_dates <- unique(as.Date(chla_fcr$DateTime))
 bvr_dates <- unique(as.Date(chla_bvr$DateTime))
 ################################################################################
-# or, EXO chla
+# below is for EXO chla
 ################################################################################
 # CCR
 chla_ccr <- read_csv("ccre-waterquality_2021_2024.csv")
@@ -67,7 +70,9 @@ chla_bvr <- chla_bvr %>%
   mutate(Latitude = 37.31288, Longitude =-79.8159)
 chla_bvr <- chla_bvr[!is.na(chla_bvr$mean_chla),]
 bvr_dates <- unique(as.Date(chla_bvr$DateTime))
+################################################################################
 
+# input either filtered or EXO 
 # define stac url
 s = stac("https://cmr.earthdata.nasa.gov/stac/LPCLOUD/")
 
@@ -158,7 +163,7 @@ fuzzy_join_dates <- function(hls_datetime, chla_dates){
   joined <- difference_inner_join(
     hls_dates, chla_dates,
     by = c("HLS_dates" = colnames(chla_dates)),
-    max_dist = 1, # day difference
+    max_dist = 2, # day difference
     distance_col = "day_diff"
   )
 }
@@ -166,7 +171,7 @@ fuzzy_join_dates <- function(hls_datetime, chla_dates){
 ccr_joined <- fuzzy_join_dates(ccr_hls_datetime, ccr_dates)
 fcr_joined <- fuzzy_join_dates(fcr_hls_datetime, fcr_dates)
 bvr_joined <- fuzzy_join_dates(bvr_hls_datetime, bvr_dates)
-# for EXO data
+# if looking at EXO data
 ccr_joined <- ccr_joined[ccr_joined$chla_dates == ccr_joined$HLS_dates,]
 fcr_joined <- fcr_joined[fcr_joined$chla_dates == fcr_joined$HLS_dates,]
 bvr_joined <- bvr_joined[bvr_joined$chla_dates == bvr_joined$HLS_dates,]
@@ -303,7 +308,7 @@ ccr_alldata <- left_join(ccr_chla_joined, ccr_vals, # join with in situ
                          by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
 ccr_alldata <- ccr_alldata[!is.na(ccr_alldata$FID),] # remove nas
 ccr_alldata <- ccr_alldata[!duplicated(ccr_alldata), ] # remove duplicates
-#write_csv(ccr_alldata, "EXO_chla_ccr_matchups.csv")
+write_csv(ccr_alldata, "filtered_chla_ccr_matchups_2day.csv")
 
 # fcr
 fcr_vals_HLSS <- get_vals("HLSS", items_fcr, fcr_chla_joined, fcr_box_utm)
@@ -313,9 +318,10 @@ fcr_alldata <- left_join(fcr_chla_joined, fcr_vals, # join with in situ
                          by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
 fcr_alldata <- fcr_alldata[!is.na(fcr_alldata$FID),]
 fcr_alldata <- fcr_alldata[!duplicated(fcr_alldata), ]
-#write_csv(fcr_alldata, "EXO_chla_fcr_matchups.csv")
+write_csv(fcr_alldata, "filtered_chla_fcr_matchups_2day.csv")
 
 # bvr
+bvr_chla_joined <- bvr_chla_joined[!is.na(bvr_chla_joined$Latitude),]
 bvr_vals_HLSS <- get_vals("HLSS", items_bvr, bvr_chla_joined, bvr_box_utm)
 bvr_vals_HLSL <- get_vals("HLSL", items_bvr, bvr_chla_joined, bvr_box_utm)
 bvr_vals <- rbind(bvr_vals_HLSS, bvr_vals_HLSL) #join
@@ -323,5 +329,5 @@ bvr_alldata <- left_join(bvr_chla_joined, bvr_vals, # join with in situ
                          by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
 bvr_alldata <- bvr_alldata[!is.na(bvr_alldata$FID),]
 bvr_alldata <- bvr_alldata[!duplicated(bvr_alldata), ]
-write_csv(bvr_alldata, "EXO_chla_bvr_matchups.csv")
+write_csv(bvr_alldata, "filtered_chla_bvr_matchups_2day.csv")
 

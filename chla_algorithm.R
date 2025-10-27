@@ -13,11 +13,14 @@ p_load('mgcv', 'ggplot2', 'tidyverse', 'dplyr', 'patchwork')
 
 # quick comparison of filtered and EXO to see relationship
 chla <- read_csv("filt-chla_2014_2024.csv")
+# new filtered chla 2025
+chla_2025 <- read_csv("https://raw.githubusercontent.com/CareyLabVT/Reservoirs/master/Data/DataNotYetUploadedToEDI/Raw_chla/Filt_chla_L1.csv")
+chla <- data.frame(rbind(chla, chla_2025))
 # only surface measurements
 chla <- chla[chla$Depth_m <= 0.1,]
 # match with lat/long
 sitelocs <- read_csv("site_descriptions.csv")
-chla <- left_join(chla, sitelocs[2:5], by = "Site")
+chla <- left_join(chla, sitelocs, by = c("Reservoir" = "Reservoir", "Site" = "Site"))
 
 # only ccr, bvr, fcr
 filtered_chla_ccr <- chla[chla$Reservoir == "CCR",] %>%
@@ -64,10 +67,11 @@ ccr_matchup + fcr_matchup
 # create simple linear estimation algorithm with filtered chla
 ################################################################################
 # CCR
-ccr_alldata <- read_csv("filtered_chla_ccr_matchups.csv") # read in data
+ccr_alldata <- read_csv("filtered_chla_ccr_matchups_2day.csv") # read in data
+ccr_alldata <- ccr_alldata[ccr_alldata$Flag_Chla_ugL < 2,]
 # create model 
-model_ccr <- lm(Chla_ugL ~ blue + green + red + NIR, data = ccr_alldata)
-model_ccr_preds <- data.frame(cbind(predict(model_ccr), ccr_alldata$Chla_ugL))
+model_ccr <- lm((Chla_ugL) ~ blue + green + red + NIR, data = ccr_alldata)
+model_ccr_preds <- data.frame(cbind((predict(model_ccr)), ccr_alldata$Chla_ugL))
 summary(model_ccr) # summary stats
 sqrt(mean(model_ccr$residuals^2)) # rmse
 # plot
@@ -76,15 +80,16 @@ ccr_plot <- ggplot(model_ccr_preds, aes(x = X1, y = X2)) +
   geom_abline(slope = 1, intercept = 0) +
   theme_classic() +
   labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
-       title = "Filtered Chl-a estimates, CCR") +
-  annotate("text", x = 2, y = 7, label = "R2 = 0.76, RMSE = 1.14")
+       title = "Filtered Chl-a estimates, CCR") 
 ccr_plot
 
 # FCR
 fcr_alldata <- read_csv("filtered_chla_fcr_matchups.csv") # read in data
+# remove really high #s
+fcr_alldata <- fcr_alldata[fcr_alldata$NIR < 2000,]
 # create model
-model_fcr <- lm(Chla_ugL ~ blue + green + red + NIR, data = fcr_alldata)
-model_fcr_preds <- data.frame(cbind(predict(model_fcr), fcr_alldata$Chla_ugL))
+model_fcr <- lm(log10(Chla_ugL) ~ blue + green + red + NIR, data = fcr_alldata)
+model_fcr_preds <- data.frame(cbind(10^(predict(model_fcr)), fcr_alldata$Chla_ugL))
 summary(model_fcr) # summary stats
 sqrt(mean(model_fcr$residuals^2)) # rmse
 # plot
@@ -93,24 +98,23 @@ fcr_plot <- ggplot(model_fcr_preds, aes(x = X1, y = X2)) +
   geom_abline(slope = 1, intercept = 0) +
   theme_classic() +
   labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
-       title = "Filtered Chl-a estimates, FCR") +
-  annotate("text", x = 5, y = 25, label = "R2 = 0.77, RMSE = 5.15")
+       title = "Filtered Chl-a estimates, FCR") 
 fcr_plot
 
 # BVR
 bvr_alldata <- read_csv("filtered_chla_bvr_matchups.csv") # read in data
 # create model
-model_bvr <- lm(Chla_ugL ~ blue + green + red + NIR, data = bvr_alldata)
-model_bvr_preds <- data.frame(cbind(predict(model_bvr), bvr_alldata$Chla_ugL))
+model_bvr <- lm(log10(Chla_ugL) ~ blue + green + red + NIR, data = bvr_alldata)
+model_bvr_preds <- data.frame(cbind(10^(predict(model_bvr)), (bvr_alldata$Chla_ugL)))
 summary(model_bvr) # summary stats
 sqrt(mean(model_bvr$residuals^2)) # rmse
 # plot
-bvr_plot <- ggplot(model_bvr_preds, aes(x = X1, y = X2)) +
+bvr_plot <- ggplot(model_bvr_preds, aes(x = (X1), y = (X2))) +
   geom_point() +
   geom_abline(slope = 1, intercept = 0) +
   theme_classic() +
   labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
-       title = "Filtered Chl-a estimates, BVR") +
+       title = "Filtered Chl-a estimates, BVR") #+
   annotate("text", x = 2.5, y = 12.5, label = "R2 = 0.89, RMSE = 1.6")
 bvr_plot
 
@@ -129,7 +133,7 @@ for (i in 1:nrow(bvr_alldata)) {
   train_data <- bvr_alldata[-i, ]
   
   # Train the model
-  model <- lm(Chla_ugL ~ green + blue + red + NIR, data = train_data)
+  model <- lm((Chla_ugL) ~ green + blue + red + NIR, data = train_data)
   
   # Make predictions on the test data
   predictions <- predict(model, newdata = test_data)
@@ -138,15 +142,15 @@ for (i in 1:nrow(bvr_alldata)) {
   rmse[i] <- sqrt(mean((test_data$Chla_ugL - predictions)^2))
   
   # Store actual vs predicted values
-  actual_vs_predicted <- rbind(actual_vs_predicted, data.frame(Actual = test_data$Chla_ugL, Predicted = predictions))
+  actual_vs_predicted <- rbind(actual_vs_predicted, 
+                               data.frame(Actual = test_data$Chla_ugL, Predicted = predictions))
 }
 
 # Average RMSE across all folds
 average_rmse <- round(mean(rmse), 2)
+average_rmse
 actual_vs_predicted %>%
   mutate(rmse = sqrt((Actual - Predicted)^2))
-
-
 
 ################################################################################
 # test out using generalized additive model (GAM) for EXO data
@@ -159,7 +163,6 @@ bvr_EXO <- read_csv("EXO_chla_bvr_matchups.csv")
 # remove data with weird vals (negatives likely caused by clouds)
 ccr_EXO <- ccr_EXO[ccr_EXO$blue > 0 & ccr_EXO$green > 0 &
                      ccr_EXO$red > 0 & ccr_EXO$NIR > 0,]
-
 
 # GAM
 ccr_EXO$log_chl <- log(ccr_EXO$mean_chla + 0.01)  # avoid zeros
@@ -224,12 +227,24 @@ test$pred <- exp(predict(gam_fit, newdata=test)) - 0.01
 
 # Evaluate
 rmse <- sqrt(mean((test$pred - test$mean_chla)^2))
-r2   <- cor(test$pred, test$mean_chla^2)
+rss <- sum((test$pred - test$mean_chla) ^ 2)  ## residual sum of squares
+tss <- sum((test$mean_chla - mean(test$mean_chla)) ^ 2)  ## total sum of squares
+r2 <- 1 - rss/tss
 cat("RMSE:", rmse, " R2:", r2, "\n")
-ggplot(test, aes(x = pred, y = mean_chla)) +
+bvr_gam_plot <- ggplot(test, aes(x = pred, y = mean_chla)) +
   geom_point() +
   theme_classic() +
-  geom_abline(slope = 1, intercept = 0)
+  geom_abline(slope = 1, intercept = 0) +
+  labs(x = 'Chla Predictions', y = "EXO Daily Average Chla",
+       title = "BVR") +
+  annotate('text', x = 3, y = 24, label = "R2 = 0.08, RMSE = 5.51") +
+  xlim(0, 11)
+bvr_gam_plot
+
+ccr_gam_plot + fcr_gam_plot + bvr_gam_plot
+
+
+
 
 
 

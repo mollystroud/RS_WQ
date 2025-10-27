@@ -57,7 +57,7 @@ ccr_box_utm <- sf::st_bbox(
 
 # set date of interest (will need to change this to update every day)
 start_date <- "2025-09-01T00:00:00Z"
-end_date <- "2025-09-30T00:00:00Z"
+end_date <- "2025-10-30T00:00:00Z"
 
 # set GDAL config options for HTTP / auth:
 gdalcubes_set_gdal_config("GDAL_HTTP_COOKIEJAR", "/tmp/cookies.txt")
@@ -214,6 +214,7 @@ clean_vnir_stars <- do.call(c, c(slices, along = "time"))
 
 # mask out land
 masked <- clean_vnir_stars[binary_stars]
+# scale for viz
 masked_scaled <- masked %>%
   mutate(across(everything(), ~ . * 0.0001)) %>%
   mutate(across(everything(), ~ pmin(pmax(., 0), 1)))  # clip to be safe
@@ -224,9 +225,35 @@ tm_shape(shp = masked_scaled) +
          col.scale = tm_scale_rgb(max_color_value = .08))
 
 
+# apply chla algorithm from chla_algorithm.R
+coords <- expand.grid(
+  x = st_get_dimension_values(masked, "x"),
+  y = st_get_dimension_values(masked, "y"),
+  time = st_get_dimension_values(masked, "time")
+)
+df <- data.frame(
+  coords,
+  red   = as.vector(masked$red),
+  green = as.vector(masked$green),
+  blue  = as.vector(masked$blue),
+  NIR   = as.vector(masked$NIR)
+)
+df <- df[df$red > 0 & df$green > 0 & df$blue > 0 & df$NIR > 0,]
+df <- na.omit(df)
 
 
+df$chla_pred <- exp(predict(gam_fit, newdata=df[4:7])) - 0.01
+df$chla_pred_lm <- predict(model_ccr, df[4:7])
 
-
+chla_stars <- st_as_stars(df, dims = c("x", "y", "time"), values = "chla_pred")
+# viz
+ggplot() +
+  geom_stars(data = chla_stars, aes(fill = chla_pred)) +
+  facet_wrap(~time, ncol = 4) +
+  scale_fill_viridis_c(
+    option = "viridis",
+    na.value = "white",
+    trans = 'log') + # make NA cells white instead of gray
+    theme_void()
 
 
