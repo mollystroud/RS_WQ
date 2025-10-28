@@ -1,7 +1,6 @@
 ################################################################################
 # Code started by Molly Stroud on 10/10/25
 ################################################################################
-
 # load in packages
 require(pacman)
 p_load('earthdatalogin', 'rstac', 'terra', 'stars', 'ggplot2', 'tidyterra', 
