@@ -37,6 +37,7 @@ filtered_chla_bvr$DateTime <- as.Date(filtered_chla_bvr$DateTime)
 test <- filtered_chla_ccr %>%
   group_by(DateTime, Depth_m) %>%
   summarize(mean_chla = mean(Chla_ugL))
+
 ccr_comp <- ggplot() +
   geom_line(data = test[#test$DateTime < "2019-01-01" & 
                           #test$DateTime > "2015-01-01" &
@@ -53,15 +54,19 @@ matched_ccr <- inner_join(filtered_chla_ccr, chla_ccr, by = "DateTime")
 matched_fcr <- inner_join(filtered_chla_fcr, chla_fcr, by = "DateTime")
 matched_bvr <- inner_join(filtered_chla_bvr, chla_bvr, by = "DateTime") #none
 
-ccr_matchup <- ggplot(matched_ccr, aes(x = Chla_ugL, y = mean_chla)) +
+bvr_matchup <- ggplot(matched_bvr[matched_bvr$Depth_m == 1.6,], 
+                      aes(x = Chla_ugL, y = mean_chla, color = DateTime)) +
   geom_point() + 
   theme_classic() +
-  labs(x = 'Filtered Chla', y = 'EXO Chla', titled = 'CCR')
-fcr_matchup <- ggplot(matched_fcr, aes(x = Chla_ugL, y = mean_chla)) +
+  labs(x = 'Filtered Chla', y = 'EXO Chla', title = 'BVR, 1.6 m')
+bvr_matchup
+fcr_matchup <- ggplot(matched_fcr[matched_fcr$Depth_m == 1.6,], 
+                      aes(x = Chla_ugL, y = mean_chla, color = DateTime)) +
   geom_point() + 
   theme_classic() +
-  labs(x = 'Filtered Chla', y = 'EXO Chla', title = 'FCR')
-ccr_matchup + fcr_matchup
+  labs(x = 'Filtered Chla', y = 'EXO Chla', title = 'FCR, 1.6 m')
+fcr_matchup
+bvr_matchup + fcr_matchup
 
 ################################################################################
 # create simple linear estimation algorithm with filtered chla
