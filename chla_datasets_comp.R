@@ -134,7 +134,8 @@ ggplot(flora_exo, aes(x = (TotalConc_ugL - Bluegreens_ugL), y = mean_chla, color
   geom_point() +
   geom_abline(slope = 1, intercept = 0) +
   theme_classic() +
-  labs(y = "EXO Chla")
+  labs(y = "EXO Chla") +
+  xlim(0, 65) + ylim(0, 65)
 
 filtered_chla <- chla
 filtered_chla$DateTime <- as.Date(filtered_chla$DateTime)

@@ -9,6 +9,7 @@ p_load('earthdatalogin', 'rstac', 'terra', 'stars', 'ggplot2', 'tidyterra',
 ################################################################################
 ## the below code is designed to pull HLS imagery over a specified area and 
 # mask out any land
+# and then apply the chla algorithm to the image(s)
 ################################################################################
 # define stac url
 s = stac("https://cmr.earthdata.nasa.gov/stac/LPCLOUD/")

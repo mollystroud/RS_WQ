@@ -41,6 +41,10 @@ yarra_box <- c(xmin = 145.886,
              ymin = -37.723, 
              xmax = 145.983, 
              ymax = -37.642)
+yarra_box_small <- c(xmin = 145.897, 
+                     ymin = -37.677, 
+                     xmax = 145.902, 
+                     ymax = -37.675)
 # convert the bounding boxes to the correct UTM projection
 yarra_box_utm <- sf::st_bbox(
   sf::st_transform(sf::st_as_sfc(sf::st_bbox(c(xmin = 145.886, 
@@ -48,29 +52,12 @@ yarra_box_utm <- sf::st_bbox(
                                                xmax = 145.983, 
                                                ymax = -37.642), 
                                              crs = "EPSG:4326")), "EPSG:32617"))
-# set date of interest
-start_date <- "2013-04-12T00:00:00Z"
-end_date <- "2025-06-18T00:00:00Z"
-# grab items within dates of interest
-items <- s %>%
-  stac_search(collections = HLS_col,
-              bbox = yarra_box,
-              datetime = paste(start_date, end_date, sep="/"),
-              limit = 500) %>%
-  ext_query("eo:cloud_cover" < 20) %>% #filter for cloud cover
-  post_request()
-items
-
-# manually add projection info into each STAC item before passing to gdalcubes
-# for some reason HLS data doesn't have this automatically included?
-for (i in seq_along(items$features)) {
-  items$features[[i]]$properties$`proj:epsg` <- 32617  # force correct projection
-}
-
-# pass to gdalcubes
-# need to separate HLSL and HLSS data since they have different band configs
-ss_items <- items$features[sapply(items$features, function(f) f$collection == "HLSS30_2.0")]
-sl_items <- items$features[sapply(items$features, function(f) f$collection == "HLSL30_2.0")]
+yarra_box_utm_small <- sf::st_bbox(
+  sf::st_transform(sf::st_as_sfc(sf::st_bbox(c(xmin = 145.897, 
+                                               ymin = -37.677, 
+                                               xmax = 145.902, 
+                                               ymax = -37.675), 
+                                             crs = "EPSG:4326")), "EPSG:32617"))
 
 ################################################################################
 # function to identify all imagery within start and end dates
@@ -92,8 +79,7 @@ get_dates <- function(bbox, dates) {
 }
 
 # call function to get dates
-yarra_hls_datetime <- get_dates(yarra_box, rev(yarra_dates)) # need to order in ascending chrono, rev if needed
-
+yarra_hls_datetime <- get_dates(yarra_box_small, rev(yarra_dates)) # need to order in ascending chrono, rev if needed
 
 
 ################################################################################
@@ -160,7 +146,7 @@ get_items <- function(joined_df, bbox){
   return(items)
 }
 
-items_yarra <- get_items(yarra_chla_joined, yarra_box)
+items_yarra <- get_items(yarra_chla_joined, yarra_box_small)
 
 ################################################################################
 # function to extract values HLSS or HLSL data based on lat/longs
@@ -217,6 +203,7 @@ get_vals <- function(HLStype, itemlist, joined_df, bbox_utm){
   points_crs <- st_as_sf(x = points,                         
                          coords = c("X1", "X2"),
                          crs = projcrs)
+  print(points)
   # extract band values at geometry points
   band_vals <- extract_geom(data, points_crs)
   band_vals <- left_join(band_vals, points, by = "FID") # add back lat/long
@@ -229,8 +216,8 @@ get_vals <- function(HLStype, itemlist, joined_df, bbox_utm){
 yarra_chla_joined$Latitude <- -37.675
 yarra_chla_joined$Longitude <- 145.899
 # call function
-yarra_vals_HLSS <- get_vals("HLSS", items_yarra, yarra_chla_joined, yarra_box_utm)
-yarra_vals_HLSL <- get_vals("HLSL", items_yarra, yarra_chla_joined, yarra_box_utm)
+yarra_vals_HLSS <- get_vals("HLSS", items_yarra, yarra_chla_joined, yarra_box_utm_small)
+yarra_vals_HLSL <- get_vals("HLSL", items_yarra, yarra_chla_joined, yarra_box_utm_small)
 yarra_vals <- data.frame(rbind(yarra_vals_HLSS, yarra_vals_HLSL)) # join
 yarra_vals$time <- as.Date(yarra_vals$time)
 yarra_alldata <- left_join(yarra_chla_joined, yarra_vals, # join with in situ
