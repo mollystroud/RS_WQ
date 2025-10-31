@@ -11,65 +11,6 @@ p_load('mgcv', 'ggplot2', 'tidyverse', 'dplyr', 'patchwork')
 # and, to test how surface chla measurements compare to measurements at depth
 ################################################################################
 
-# quick comparison of filtered and EXO to see relationship
-chla <- read_csv("filt-chla_2014_2024.csv")
-# new filtered chla 2025
-chla_2025 <- read_csv("https://raw.githubusercontent.com/CareyLabVT/Reservoirs/master/Data/DataNotYetUploadedToEDI/Raw_chla/Filt_chla_L1.csv")
-chla <- data.frame(rbind(chla, chla_2025))
-# only surface measurements
-#chla <- chla[chla$Depth_m <= 0.1,]
-# match with lat/long
-sitelocs <- read_csv("site_descriptions.csv")
-chla <- left_join(chla, sitelocs, by = c("Reservoir" = "Reservoir", "Site" = "Site"))
-
-# only ccr, bvr, fcr
-filtered_chla_ccr <- chla[chla$Reservoir == "CCR",] %>%
-  filter(Site == 50)
-filtered_chla_ccr$DateTime <- as.Date(filtered_chla_ccr$DateTime)
-filtered_chla_fcr <- chla[chla$Reservoir == "FCR",] %>%
-  filter(Site == 50)
-filtered_chla_fcr$DateTime <- as.Date(filtered_chla_fcr$DateTime)
-filtered_chla_bvr <- chla[chla$Reservoir == "BVR",] %>%
-  filter(Site == 50)
-filtered_chla_bvr$DateTime <- as.Date(filtered_chla_bvr$DateTime)
-
-# within filtered
-filtered_chla_fcr <- filtered_chla_fcr %>%
-  group_by(DateTime, Depth_m) %>%
-  summarize(mean_chla = mean(Chla_ugL))
-
-test <- filtered_chla_fcr[filtered_chla_fcr$Depth_m < 2,] %>%
-  select(DateTime, Depth_m, mean_chla) %>%
-  pivot_wider(names_from = Depth_m, values_from = mean_chla)
-
-bvr_comp <- ggplot() +
-  geom_point(data = test, 
-             aes(x = `0.1`, y = `1.6`, color = DateTime)) +
-  theme_classic() +
-  labs(x = "0.1 m", y = '1.6 m', title = 'FCR') +
-  geom_abline(slope = 1, intercept = 0)
-bvr_comp
-ccr_comp + fcr_comp + bvr_comp
-
-# plot EXO vs. filtered chla at 1.6 m
-# other dfs are from chla_data_match.R
-matched_ccr <- inner_join(filtered_chla_ccr, chla_ccr, by = "DateTime")
-matched_fcr <- inner_join(filtered_chla_fcr, chla_fcr, by = "DateTime")
-matched_bvr <- inner_join(filtered_chla_bvr, chla_bvr, by = "DateTime") #none
-
-bvr_matchup <- ggplot(matched_bvr[matched_bvr$Depth_m == 1.6,], 
-                      aes(x = Chla_ugL, y = mean_chla, color = DateTime)) +
-  geom_point() + 
-  theme_classic() +
-  labs(x = 'Filtered Chla', y = 'EXO Chla', title = 'BVR, 1.6 m')
-bvr_matchup
-fcr_matchup <- ggplot(matched_fcr[matched_fcr$Depth_m == 1.6,], 
-                      aes(x = Chla_ugL, y = mean_chla, color = DateTime)) +
-  geom_point() + 
-  theme_classic() +
-  labs(x = 'Filtered Chla', y = 'EXO Chla', title = 'FCR, 1.6 m')
-fcr_matchup
-bvr_matchup + fcr_matchup
 
 ################################################################################
 # create simple linear estimation algorithm with filtered chla

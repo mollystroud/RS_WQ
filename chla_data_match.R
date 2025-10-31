@@ -30,48 +30,7 @@ chla_bvr <- chla[chla$Reservoir == "BVR",]
 ccr_dates <- unique(as.Date(chla_ccr$DateTime))
 fcr_dates <- unique(as.Date(chla_fcr$DateTime))
 bvr_dates <- unique(as.Date(chla_bvr$DateTime))
-################################################################################
-# below is for EXO chla
-################################################################################
-# CCR
-chla_ccr <- read_csv("ccre-waterquality_2021_2024.csv")
-chla_ccr <- chla_ccr[!is.na(chla_ccr$EXOChla_ugL_1),] %>%
-  select(DateTime, EXOChla_ugL_1) 
-# average over each date
-chla_ccr$DateTime <- as.Date(chla_ccr$DateTime)
-chla_ccr <- chla_ccr %>%
-  group_by(DateTime) %>%
-  summarize(mean_chla = mean(EXOChla_ugL_1)) %>%
-  mutate(Latitude = 37.3697, Longitude =-79.958)
-chla_ccr <- chla_ccr[!is.na(chla_ccr$mean_chla),]
-ccr_dates <- unique(as.Date(chla_ccr$DateTime))
-# FCR
-chla_fcr <- read_csv("fcre-waterquality_2018_2024.csv")
-chla_fcr <- chla_fcr[!is.na(chla_fcr$EXOChla_ugL_1),] %>%
-  select(DateTime, EXOChla_ugL_1) 
-# average over each date
-chla_fcr$DateTime <- as.Date(chla_fcr$DateTime)
-chla_fcr <- chla_fcr %>%
-  group_by(DateTime) %>%
-  summarize(mean_chla = mean(EXOChla_ugL_1)) %>%
-  mutate(Latitude = 37.30325, Longitude =-79.8373)
-chla_fcr <- chla_fcr[!is.na(chla_fcr$mean_chla),]
-fcr_dates <- unique(as.Date(chla_fcr$DateTime))
-# BVR
-chla_bvr <- read_csv("bvre-waterquality_2020_2024.csv")
-chla_bvr <- chla_bvr[!is.na(chla_bvr$EXOChla_ugL_1.5),] %>%
-  select(DateTime, EXOChla_ugL_1.5) 
-# average over each date
-chla_bvr$DateTime <- as.Date(chla_bvr$DateTime)
-chla_bvr <- chla_bvr %>%
-  group_by(DateTime) %>%
-  summarize(mean_chla = mean(EXOChla_ugL_1.5)) %>%
-  mutate(Latitude = 37.31288, Longitude =-79.8159)
-chla_bvr <- chla_bvr[!is.na(chla_bvr$mean_chla),]
-bvr_dates <- unique(as.Date(chla_bvr$DateTime))
-################################################################################
 
-# input either filtered or EXO 
 # define stac url
 s = stac("https://cmr.earthdata.nasa.gov/stac/LPCLOUD/")
 
@@ -142,7 +101,6 @@ get_dates <- function(bbox, dates) {
     items_fetch()
   dates <- sapply(items$features, function(x) x$properties$datetime)
 }
-
 # call function to get dates
 ccr_hls_datetime <- get_dates(ccr_box, ccr_dates)
 fcr_hls_datetime <- get_dates(fcr_box, fcr_dates)
@@ -165,6 +123,7 @@ fuzzy_join_dates <- function(hls_datetime, chla_dates){
     max_dist = 2, # day difference
     distance_col = "day_diff"
   )
+  print(joined)
 }
 
 ccr_joined <- fuzzy_join_dates(ccr_hls_datetime, ccr_dates)
