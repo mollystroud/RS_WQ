@@ -31,50 +31,14 @@ ccr_dates <- unique(as.Date(chla_ccr$DateTime))
 fcr_dates <- unique(as.Date(chla_fcr$DateTime))
 bvr_dates <- unique(as.Date(chla_bvr$DateTime))
 
+# get bboxes
+source("roanokeres_bbox.R")
+
 # define stac url
 s = stac("https://cmr.earthdata.nasa.gov/stac/LPCLOUD/")
 
 # both sentinel and landsat hls data
 HLS_col <- list("HLSS30_2.0", "HLSL30_2.0")
-
-# beaverdam reservoir bbox
-bvr_box <- c(xmin = -79.827088, 
-             ymin = 37.311798, 
-             xmax = -79.811865, 
-             ymax = 37.321694)
-# falling creek reservoir bbox
-fcr_box <- c(xmin = -79.840037, 
-             ymin = 37.301435, 
-             xmax = -79.833651, 
-             ymax = 37.311487)
-# carvins cove reservoir bbox
-ccr_box <- c(xmin = -79.981728, 
-             ymin = 37.367522, 
-             xmax = -79.942552, 
-             ymax = 37.407255)
-
-# convert the bounding boxes to the correct UTM projection
-bvr_box_utm <- sf::st_bbox(
-  sf::st_transform(sf::st_as_sfc(sf::st_bbox(c(xmin = -79.827088, 
-                                               ymin = 37.311798, 
-                                               xmax = -79.811865, 
-                                               ymax = 37.321694), 
-                                             crs = "EPSG:4326")), "EPSG:32617")
-)
-fcr_box_utm <- sf::st_bbox(
-  sf::st_transform(sf::st_as_sfc(sf::st_bbox(c(xmin = -79.840037, 
-                                               ymin = 37.301435, 
-                                               xmax = -79.833651, 
-                                               ymax = 37.311487), 
-                                             crs = "EPSG:4326")), "EPSG:32617")
-)
-ccr_box_utm <- sf::st_bbox(
-  sf::st_transform(sf::st_as_sfc(sf::st_bbox(c(xmin = -79.981728, 
-                                               ymin = 37.367522, 
-                                               xmax = -79.942552, 
-                                               ymax = 37.407255), 
-                                             crs = "EPSG:4326")), "EPSG:32617")
-)
 
 # set GDAL config options for HTTP / auth:
 gdalcubes_set_gdal_config("GDAL_HTTP_COOKIEJAR", "/tmp/cookies.txt")
@@ -123,18 +87,12 @@ fuzzy_join_dates <- function(hls_datetime, chla_dates){
     max_dist = 2, # day difference
     distance_col = "day_diff"
   )
-  print(joined)
+  return(joined)
 }
 
 ccr_joined <- fuzzy_join_dates(ccr_hls_datetime, ccr_dates)
 fcr_joined <- fuzzy_join_dates(fcr_hls_datetime, fcr_dates)
 bvr_joined <- fuzzy_join_dates(bvr_hls_datetime, bvr_dates)
-# if looking at EXO data
-ccr_joined <- ccr_joined[ccr_joined$chla_dates == ccr_joined$HLS_dates,]
-fcr_joined <- fcr_joined[fcr_joined$chla_dates == fcr_joined$HLS_dates,]
-bvr_joined <- bvr_joined[bvr_joined$chla_dates == bvr_joined$HLS_dates,]
-
-
 
 # now join back with full chla data. possibly make this a function or add to above function
 # ccr
