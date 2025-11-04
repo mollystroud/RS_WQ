@@ -78,9 +78,9 @@ filtered_chla_bvr <- chla[chla$Reservoir == "BVR",] %>%
 filtered_chla_bvr$DateTime <- as.Date(filtered_chla_bvr$DateTime)
 
 # within filtered, see how 0.1 and 1.6 match up
-filtered_chla_fcr <- filtered_chla_fcr %>%
-  group_by(DateTime, Depth_m) %>%
-  summarize(mean_chla = mean(Chla_ugL))
+#filtered_chla_fcr <- filtered_chla_fcr %>%
+  #group_by(DateTime, Depth_m) %>%
+  #summarize(mean_chla = mean(Chla_ugL))
 
 test <- filtered_chla_fcr[filtered_chla_fcr$Depth_m < 2,] %>%
   select(DateTime, Depth_m, mean_chla) %>%
@@ -117,7 +117,30 @@ fcr_matchup <- ggplot(matched_fcr[matched_fcr$Depth_m == 1.6,],
   ylim(0, 100)
 fcr_matchup
 bvr_matchup + fcr_matchup
+
+ggplot() +
+  geom_point(data = matched_fcr[matched_fcr$Depth_m == 1.6,], 
+             aes(x = Chla_ugL, y = mean_chla, color = 'darkblue'), alpha = 0.6) +
+  geom_point(data = matched_bvr[matched_bvr$Depth_m == 1.6,],
+             aes(x = Chla_ugL, y = mean_chla, color = 'red'), alpha = 0.6) +
+  theme_classic() +
+  geom_abline(slope = 1, intercept = 0) +
+  labs(x = 'Filtered Chla', y = 'EXO', color = element_blank()) +
+  scale_color_manual(values =c('darkblue'='darkblue','red'='red'), labels = c('FCR','BVR')) +
+  xlim(0, 100) + ylim(0, 100)
+
 ################################################################################
+# subtract EXO from filtered
+ggplot() +
+  geom_point(data = matched_fcr[matched_fcr$Depth_m == 1.6,], 
+             aes(x = DateTime, y = (Chla_ugL - mean_chla), color = 'darkblue'), alpha = 0.6) +
+  geom_point(data = matched_bvr[matched_bvr$Depth_m == 1.6,],
+             aes(x = DateTime, y = (Chla_ugL - mean_chla), color = 'red'), alpha = 0.6) +
+  theme_classic() +
+  geom_abline(slope = 0, intercept = 0) +
+  labs(x = element_blank(), y = 'Filtered Chla - EXO', color = element_blank()) +
+  scale_color_manual(values =c('darkblue'='darkblue','red'='red'), labels = c('FCR','BVR'))
+
 
 
 ################################################################################
@@ -127,9 +150,10 @@ flora <- read_csv("fluoroprobe_2014_2024.csv")
 flora$DateTime <- as.Date(flora$DateTime)
 exo <- data.frame(rbind(exo_bvr, exo_ccr, exo_fcr))
 
+# join FLORA and EXO
 flora_exo <- inner_join(flora, exo, by = c("DateTime", "Reservoir"))
 flora_exo <- flora_exo[flora_exo$Depth_m < 1.6 & flora_exo$Depth_m > 1.4,]
-
+# plot
 ggplot(flora_exo, aes(x = (TotalConc_ugL - Bluegreens_ugL), y = mean_chla, color = DateTime)) +
   geom_point() +
   geom_abline(slope = 1, intercept = 0) +
@@ -137,18 +161,25 @@ ggplot(flora_exo, aes(x = (TotalConc_ugL - Bluegreens_ugL), y = mean_chla, color
   labs(y = "EXO Chla") +
   xlim(0, 65) + ylim(0, 65)
 
+# looked at filtered chla
 filtered_chla <- chla
 filtered_chla$DateTime <- as.Date(filtered_chla$DateTime)
+# 'surface'
 flora_surface <- flora[flora$Depth_m > 0.48 & flora$Depth_m < 0.52,]
+# match by date and reservoir
 flora_filtered <- inner_join(flora_surface, filtered_chla, by = c("DateTime", "Reservoir"))
 
-
+# only 'good' data
 flora_filtered <- flora_filtered[flora_filtered$Flag_Chla_ugL == 0,]
+
+# plot
 ggplot(flora_filtered, aes(x = TotalConc_ugL, y = Chla_ugL, color = DateTime)) +
   geom_point() +
   geom_abline(slope = 1, intercept = 0) +
   theme_classic() +
   labs(y = "Filtered Chla")
+
+
 
 
 

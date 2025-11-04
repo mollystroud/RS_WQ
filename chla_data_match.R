@@ -31,6 +31,24 @@ ccr_dates <- unique(as.Date(chla_ccr$DateTime))
 fcr_dates <- unique(as.Date(chla_fcr$DateTime))
 bvr_dates <- unique(as.Date(chla_bvr$DateTime))
 
+################################################################################
+# same but with FLORA!
+################################################################################
+flora <- read_csv("fluoroprobe_2014_2024.csv")
+flora <- flora[flora$Depth_m >= 0.48 & flora$Depth_m <= 0.52,]
+sitelocs <- read_csv("site_descriptions.csv")
+flora <- left_join(flora, sitelocs, by = c("Reservoir" = "Reservoir", "Site" = "Site"))
+# organize by res
+chl_ccr <- flora[flora$Reservoir == "CCR",]
+chla_fcr <- flora[flora$Reservoir == "FCR",]
+chla_bvr <- flora[flora$Reservoir == "BVR",]
+
+# get unique dates
+ccr_dates <- unique(as.Date(chl_ccr$DateTime))
+fcr_dates <- unique(as.Date(chla_fcr$DateTime))
+bvr_dates <- unique(as.Date(chla_bvr$DateTime))
+
+
 # get bboxes
 source("roanokeres_bbox.R")
 
@@ -84,7 +102,7 @@ fuzzy_join_dates <- function(hls_datetime, chla_dates){
   joined <- difference_inner_join(
     hls_dates, chla_dates,
     by = c("HLS_dates" = colnames(chla_dates)),
-    max_dist = 2, # day difference
+    max_dist = 1, # day difference
     distance_col = "day_diff"
   )
   return(joined)
@@ -207,6 +225,7 @@ get_vals <- function(HLStype, itemlist, joined_df, bbox_utm){
   points_crs <- st_as_sf(x = points,                         
                          coords = c("X1", "X2"),
                          crs = projcrs)
+  print(points_crs)
   # extract band values at geometry points
   band_vals <- extract_geom(data, points_crs)
   band_vals <- left_join(band_vals, points, by = "FID") # add back lat/long
@@ -227,14 +246,15 @@ ccr_alldata <- ccr_alldata[!duplicated(ccr_alldata), ] # remove duplicates
 write_csv(ccr_alldata, "filtered_chla_ccr_matchups_2day.csv")
 
 # fcr
-fcr_vals_HLSS <- get_vals("HLSS", items_fcr, fcr_chla_joined, fcr_box_utm)
+fcr_chla_joined <- fcr_chla_joined[is.na(fcr_chla_joined$Longitude) == FALSE,]
+fcr_vals_HLSS <- get_vals("HLSS", items_fcr, unique(fcr_chla_joined), fcr_box_utm)
 fcr_vals_HLSL <- get_vals("HLSL", items_fcr, fcr_chla_joined, fcr_box_utm)
 fcr_vals <- rbind(fcr_vals_HLSS, fcr_vals_HLSL) # join
 fcr_alldata <- left_join(fcr_chla_joined, fcr_vals, # join with in situ
                          by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
 fcr_alldata <- fcr_alldata[!is.na(fcr_alldata$FID),]
 fcr_alldata <- fcr_alldata[!duplicated(fcr_alldata), ]
-write_csv(fcr_alldata, "filtered_chla_fcr_matchups_2day.csv")
+write_csv(fcr_alldata, "flora_chla_fcr_matchups_1day.csv")
 
 # bvr
 bvr_chla_joined <- bvr_chla_joined[!is.na(bvr_chla_joined$Latitude),]
@@ -245,5 +265,5 @@ bvr_alldata <- left_join(bvr_chla_joined, bvr_vals, # join with in situ
                          by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
 bvr_alldata <- bvr_alldata[!is.na(bvr_alldata$FID),]
 bvr_alldata <- bvr_alldata[!duplicated(bvr_alldata), ]
-write_csv(bvr_alldata, "filtered_chla_bvr_matchups_2day.csv")
+write_csv(bvr_alldata, "flota_chla_bvr_matchups_1day.csv")
 

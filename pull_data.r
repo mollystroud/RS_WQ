@@ -94,10 +94,11 @@ create_data_cube <- function(bbox, bbox_utm, start_date, end_date, HLStype) {
 }
 
 # set date of interest
-start_date <- "2016-01-01T00:00:00Z"
-end_date <- "2016-04-30T00:00:00Z"
+start_date <- "2019-01-01T00:00:00Z"
+end_date <- "2019-03-30T00:00:00Z"
 data_S30 <- create_data_cube(ccr_box, ccr_box_utm, start_date, end_date, "HLSS")
 data_L30 <- create_data_cube(ccr_box, ccr_box_utm, start_date, end_date, "HLSL")
+
 
 ################################################################################
 # Function to create water mask
@@ -158,13 +159,13 @@ water_mask <- function(datacube_HLSS, datacube_HLSL){
                                     values = time_labels)
   # rename
   names(binary_stars) <- "watermask"
-  # viz
-  tm_shape(shp = binary_stars) + 
-    tm_raster(col = "watermask", palette = '-viridis')
   return(binary_stars)
 }
 
 mask <- water_mask(data_S30, data_L30)
+# viz
+tm_shape(shp = mask) +
+  tm_raster(col = "watermask", palette = '-viridis')
 
 ################################################################################
 # Function to download VNIR data and mask it

@@ -41,23 +41,25 @@ yarra_box <- c(xmin = 145.886,
              ymin = -37.723, 
              xmax = 145.983, 
              ymax = -37.642)
-yarra_box_small <- c(xmin = 145.897, 
-                     ymin = -37.677, 
-                     xmax = 145.902, 
-                     ymax = -37.675)
+yarra_box_small <- c(
+  xmin = 145.895, 
+  ymin = -37.680, 
+  xmax = 145.905, 
+  ymax = -37.670
+)
 # convert the bounding boxes to the correct UTM projection
 yarra_box_utm <- sf::st_bbox(
   sf::st_transform(sf::st_as_sfc(sf::st_bbox(c(xmin = 145.886, 
                                                ymin = -37.723, 
                                                xmax = 145.983, 
                                                ymax = -37.642), 
-                                             crs = "EPSG:4326")), "EPSG:32617"))
+                                             crs = "EPSG:4326")), "EPSG:32655"))
 yarra_box_utm_small <- sf::st_bbox(
-  sf::st_transform(sf::st_as_sfc(sf::st_bbox(c(xmin = 145.897, 
-                                               ymin = -37.677, 
-                                               xmax = 145.902, 
-                                               ymax = -37.675), 
-                                             crs = "EPSG:4326")), "EPSG:32617"))
+  sf::st_transform(sf::st_as_sfc(sf::st_bbox(c(  xmin = 145.895, 
+                                                 ymin = -37.680, 
+                                                 xmax = 145.905, 
+                                                 ymax = -37.670), 
+                                             crs = "EPSG:4326")), "EPSG:32655"))
 
 ################################################################################
 # function to identify all imagery within start and end dates
@@ -80,7 +82,7 @@ get_dates <- function(bbox, dates) {
 
 # call function to get dates
 yarra_hls_datetime <- get_dates(yarra_box_small, rev(yarra_dates)) # need to order in ascending chrono, rev if needed
-
+yarra_hls_datetime
 
 ################################################################################
 # function to fuzzy match dates with in situ dates
@@ -109,7 +111,7 @@ yarra_chla_joined <- yarra_chla[yarra_chla$datetime %in% yarra_joined$chla_dates
 yarra_chla_joined <- left_join(yarra_chla_joined, yarra_joined, 
                              by = c("datetime" = "chla_dates"))
 yarra_chla_joined <- unique(yarra_chla_joined)
-
+yarra_chla_joined
 ################################################################################
 # function to perform stac_search on specific dates
 ################################################################################
@@ -140,14 +142,14 @@ get_items <- function(joined_df, bbox){
   # manually add projection info into each STAC item before passing to gdalcubes
   # for some reason HLS data doesn't have this automatically included?
   for (i in seq_along(items$features)) {
-    items$features[[i]]$properties$`proj:epsg` <- 32617  # force correct projection
+    items$features[[i]]$properties$`proj:epsg` <- 32655  # force correct projection
   }
   
   return(items)
 }
 
 items_yarra <- get_items(yarra_chla_joined, yarra_box_small)
-
+items_yarra
 ################################################################################
 # function to extract values HLSS or HLSL data based on lat/longs
 ################################################################################
@@ -157,7 +159,7 @@ get_vals <- function(HLStype, itemlist, joined_df, bbox_utm){
   start_date <- paste0(joined_df$HLS_dates[1], "T00:00:00Z")
   end_date <- paste0(joined_df[length(joined_df$HLS_dates),]$HLS_dates, "T00:00:00Z")
   # define the cube space
-  cube <- cube_view(srs ="EPSG:32617",
+  cube <- cube_view(srs ="EPSG:32655",
                     extent = list(t0 = start_date, 
                                   t1 = end_date,
                                   left = bbox_utm[1], 
@@ -171,7 +173,7 @@ get_vals <- function(HLStype, itemlist, joined_df, bbox_utm){
                     resampling = "average")
   # get only HLSL or HLSS stac image collection
   if(HLStype == "HLSS"){
-    hls_items <- itemlist$features[sapply(itemlist$features, function(f) f$collection == "HLSS30_2.0")]
+    hls_items <- rev(itemlist$features)[sapply(rev(itemlist$features), function(f) f$collection == "HLSS30_2.0")]
     # sentinel collection
     col_S30 <- stac_image_collection(
       hls_items,
@@ -183,7 +185,7 @@ get_vals <- function(HLStype, itemlist, joined_df, bbox_utm){
     data <- rename_bands(data, B02 = "blue", B03 = "green", B04 = "red",
                          B8A = "NIR")
   } else {
-    hls_items <- itemlist$features[sapply(itemlist$features, function(f) f$collection == "HLSL30_2.0")]
+    hls_items <- rev(itemlist$features)[sapply(rev(itemlist$features), function(f) f$collection == "HLSL30_2.0")]
     # landsat collection
     col_L30 <- stac_image_collection(
       hls_items,
@@ -203,7 +205,6 @@ get_vals <- function(HLStype, itemlist, joined_df, bbox_utm){
   points_crs <- st_as_sf(x = points,                         
                          coords = c("X1", "X2"),
                          crs = projcrs)
-  print(points)
   # extract band values at geometry points
   band_vals <- extract_geom(data, points_crs)
   band_vals <- left_join(band_vals, points, by = "FID") # add back lat/long
@@ -212,9 +213,16 @@ get_vals <- function(HLStype, itemlist, joined_df, bbox_utm){
   return(band_vals)
 }
 
+
 # add lat/long
-yarra_chla_joined$Latitude <- -37.675
-yarra_chla_joined$Longitude <- 145.899
+yarra_chla_joined$Latitude <- -37.67628
+yarra_chla_joined$Longitude <- 145.90053
+#yarra_chla_joined$Latitude[1] <- -37.67631
+#yarra_chla_joined$Longitude[1] <- 145.90042
+# dates need to be ordered correctly
+yarra_chla_joined <- yarra_chla_joined[nrow(yarra_chla_joined):1, ]
+
+
 # call function
 yarra_vals_HLSS <- get_vals("HLSS", items_yarra, yarra_chla_joined, yarra_box_utm_small)
 yarra_vals_HLSL <- get_vals("HLSL", items_yarra, yarra_chla_joined, yarra_box_utm_small)
@@ -222,8 +230,30 @@ yarra_vals <- data.frame(rbind(yarra_vals_HLSS, yarra_vals_HLSL)) # join
 yarra_vals$time <- as.Date(yarra_vals$time)
 yarra_alldata <- left_join(yarra_chla_joined, yarra_vals, # join with in situ
                          by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
-ccr_alldata <- ccr_alldata[!is.na(ccr_alldata$FID),] # remove nas
-ccr_alldata <- ccr_alldata[!duplicated(ccr_alldata), ] # remove duplicates
-write_csv(ccr_alldata, "filtered_chla_ccr_matchups_2day.csv")
+yarra_alldata <- yarra_alldata[!is.na(yarra_alldata$FID),] # remove nas
+yarra_alldata <- yarra_alldata[!duplicated(yarra_alldata), ] # remove duplicates
+write_csv(yarra_alldata, "yarra_chla_matchups_2day.csv")
+
+
+# CCR
+yarra_alldata <- read_csv("yarra_chla_matchups_2day.csv") # read in data
+
+yarra_alldata <- yarra_alldata[yarra_alldata$NIR > 0 & yarra_alldata$red > 0 &
+                                 yarra_alldata$green > 0 & yarra_alldata$blue > 0,]
+# create model 
+model_yarra <- lm(log10(observation) ~ blue + green + red + NIR, data = yarra_alldata)
+model_yarra_preds <- data.frame(cbind((predict(model_yarra)), yarra_alldata$observation))
+summary(model_yarra) # summary stats
+sqrt(mean(model_yarra$residuals^2)) # rmse
+# plot
+yarra_plot <- ggplot(model_yarra_preds, aes(x = 10^X1, y = X2)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_classic() +
+  labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
+       title = "Yarra Reservoir") 
+yarra_plot
+
+
 
 
