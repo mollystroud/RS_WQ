@@ -15,7 +15,7 @@ p_load('earthdatalogin', 'rstac', 'terra', 'stars', 'ggplot2', 'tidyterra',
 ################################################################################
 yarra_wq <- read_csv("YARR-targets-insitu.csv")
 yarra_chla <- yarra_wq[yarra_wq$variable == "PHY_TCHLA",]
-#yarra_chla <- yarra_wq[yarra_wq$variable == "turbidity",]
+yarra_turb <- yarra_wq[yarra_wq$variable == "turbidity",]
 
 yarra_chla <- yarra_chla[yarra_chla$depth <= 0.1,]
 yarra_dates <- unique(as.Date(yarra_chla$datetime[yarra_chla$datetime > "2013-04-10"]))
@@ -244,14 +244,16 @@ yarra_alldata <- yarra_alldata[yarra_alldata$NIR > 0 & yarra_alldata$red > 0 &
 model_yarra <- lm(log10(observation) ~ blue + green + red + NIR, data = yarra_alldata)
 model_yarra_preds <- data.frame(cbind((predict(model_yarra)), yarra_alldata$observation))
 summary(model_yarra) # summary stats
-sqrt(mean(model_yarra$residuals^2)) # rmse
+10^sqrt(mean(model_yarra$residuals^2)) # rmse
 # plot
 yarra_plot <- ggplot(model_yarra_preds, aes(x = 10^X1, y = X2)) +
   geom_point() +
   geom_abline(slope = 1, intercept = 0) +
   theme_classic() +
   labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
-       title = "Yarra Reservoir") 
+       title = "Yarra Reservoir") +
+  annotate("text", label = "RMSE = 1.5, R2 = 0.3", x = 1, y = 3) +
+  xlim(0, 3) + ylim(0, 3)
 yarra_plot
 
 

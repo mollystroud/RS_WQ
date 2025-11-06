@@ -314,13 +314,17 @@ for(file in values_files){
 alldata
 alldata <- alldata[alldata$mean_value < 40 & alldata$dock_value < 40,]
 write_csv(alldata, 'reservoirs_vnir_data/all_chla_est.csv')
+alldata <- read_csv('reservoirs_vnir_data/all_chla_est.csv')
 
 ggplot() +
-  geom_point(data = alldata, aes(x = time, y = mean_value), color = 'darkblue') +
+  geom_point(data = alldata, aes(x = time, y = mean_value, color = 'darkblue')) +
   geom_line(data = alldata, aes(x = time, y = mean_value), color = 'darkblue') +
-  geom_point(data = alldata, aes(x = time, y = dock_value), color = 'red') +
+  geom_point(data = alldata, aes(x = time, y = dock_value, color = 'red')) +
   geom_line(data = alldata, aes(x = time, y = dock_value), color = 'red') +
-  theme_classic()
+  theme_classic() +
+  scale_color_manual(values =c('darkblue'='darkblue','red'='red'), 
+                                        labels = c('Mean chla value','Value near dock')) +
+  labs(x = element_blank(), y = "Chl-a (ugL)", color = element_blank(), title = "FCR")
 
 
 

@@ -101,6 +101,81 @@ average_rmse
 actual_vs_predicted %>%
   mutate(rmse = sqrt((Actual - Predicted)^2))
 
+
+################################################################################
+# create simple linear estimation algorithm with flouroprobe
+################################################################################
+flora_fcr <- read_csv("flora_chla_fcr_matchups_1day.csv")
+flora_fcr <- flora_fcr[flora_fcr$NIR < 1500 & flora_fcr$NIR > 0,]
+grouped_flora_fcr <- flora_fcr %>%
+  group_by(DateTime, Site) %>%
+  summarize(mean_chla = mean(TotalConc_ugL),
+            blue = mean(blue),
+            green = mean(green),
+            red = mean(red),
+            NIR = mean(NIR))
+# create model
+model_fcr_flora <- lm(log10(mean_chla) ~ blue + green + red + NIR, 
+                      data = grouped_flora_fcr)
+model_fcr_flora_preds <- data.frame(cbind(10^(predict(model_fcr_flora)), 
+                                          grouped_flora_fcr$mean_chla))
+summary(model_fcr_flora) # summary stats
+10^sqrt(mean(model_fcr_flora$residuals^2)) # rmse
+# plot
+fcr_plot <- ggplot(model_fcr_flora_preds, aes(x = X1, y = X2)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_classic() +
+  labs(x = "Predicted Chl-a (ugL)", y = "Flouroprobe Chl-A (ugL)",
+       title = "FCR") +
+  xlim(0, 90) + ylim(0, 90) +
+  annotate("text", label = "RMSE = 2.1 ugL, R2 = 0.38", x = 30, y = 75)
+fcr_plot
+
+
+#
+flora_bvr <- read_csv("flora_chla_bvr_matchups_1day.csv")
+flora_bvr <- flora_bvr[flora_bvr$NIR < 1500 & flora_bvr$NIR > 0,]
+grouped_flora_bvr <- flora_bvr %>%
+  group_by(DateTime, Site) %>%
+  summarize(mean_chla = mean(TotalConc_ugL),
+          blue = mean(blue),
+          green = mean(green),
+          red = mean(red),
+          NIR = mean(NIR))
+# create model
+model_bvr_flora <- lm(log10(mean_chla) ~ blue + green + red + NIR, data = grouped_flora_bvr)
+model_bvr_flora_preds <- data.frame(cbind(10^(predict(model_bvr_flora)), grouped_flora_bvr$mean_chla))
+summary(model_bvr_flora) # summary stats
+10^sqrt(mean(model_bvr_flora$residuals^2)) # rmse
+# plot
+bvr_plot <- ggplot(model_bvr_flora_preds, aes(x = X1, y = X2)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_classic() +
+  labs(x = "Predicted Chl-a (ugL)", y = "Flouroprobe Chl-A (ugL)",
+       title = "BVR") +
+  xlim(0, 41) + ylim(0, 41) +
+  annotate("text", label = "RMSE = 1.6 ugL, R2 = 0.13", x = 15, y = 35)
+
+bvr_plot
+
+fcr_plot + bvr_plot
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ################################################################################
 # test out using generalized additive model (GAM) for EXO data
 ################################################################################
