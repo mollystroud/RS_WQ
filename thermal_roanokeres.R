@@ -150,3 +150,88 @@ ggplot() +
 ccr_vals <- get_vals(ccr_points, thermal_masked_ccr)
 write_csv(ccr_vals, "thermal_LS_CCR.csv")
 
+################################################################################
+# compare to in situ data
+################################################################################
+fcr_temp <- read_csv("thermal_LS_FCR.csv")
+fcr_insitu <- read_csv("fcre-waterquality_2018_2024.csv")
+fcr_insitu$DateTime <- as.Date(fcr_insitu$DateTime)
+fcr_insitu <- fcr_insitu %>%
+  select(DateTime, ThermistorTemp_C_surface) %>%
+  group_by(DateTime) %>%
+  summarise(mean_insitu_temp = mean(ThermistorTemp_C_surface))
+fcr_all <- left_join(fcr_temp, fcr_insitu, by = c("time" = "DateTime"))
+fcr_all <- na.omit(fcr_all)
+
+fcr_tempcomp <- ggplot(fcr_all, aes(x = mean_thermal_C, y = mean_insitu_temp, color = time)) +
+  geom_point() +
+  scale_color_viridis(trans = 'date') +
+  theme_classic() +
+  geom_abline(intercept = 0, slope = 1) +
+  xlim(-3, 35) + ylim(-3, 35) +
+  labs(x = "Remotely sensed temperature (C)", y = "In situ temperature (C)",
+       color = element_blank(), title = "FCR")
+fcr_tempcomp
+
+ccr_temp <- read_csv("thermal_LS_CCR.csv")
+ccr_insitu <- read_csv("ccre-waterquality_2021_2024.csv")
+ccr_insitu$DateTime <- as.Date(ccr_insitu$DateTime)
+ccr_insitu <- ccr_insitu %>%
+  select(DateTime, ThermistorTemp_C_1) %>%
+  group_by(DateTime) %>%
+  summarise(mean_insitu_temp = mean(ThermistorTemp_C_1))
+ccr_all <- left_join(ccr_temp, ccr_insitu, by = c("time" = "DateTime"))
+ccr_all <- na.omit(ccr_all)
+
+ccr_tempcomp <- ggplot(ccr_all, aes(x = mean_thermal_C, y = mean_insitu_temp, color = time)) +
+  geom_point() +
+  scale_color_viridis(trans = 'date') +
+  theme_classic() +
+  geom_abline(intercept = 0, slope = 1) +
+  xlim(0, 35) + ylim(0, 35) +
+  labs(x = "Remotely sensed temperature (C)", y = "In situ temperature (C)",
+       color = element_blank(), title = "CCR")
+ccr_tempcomp
+
+library(patchwork)
+ccr_tempcomp + fcr_tempcomp
+#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# no matches for BVR
+bvr_temp <- read_csv("thermal_LS_BVR.csv")
+bvr_insitu <- read_csv("bvre-waterquality_2020_2024.csv")
+bvr_insitu$DateTime <- as.Date(bvr_insitu$DateTime)
+bvr_insitu <- bvr_insitu %>%
+  select(DateTime, ThermistorTemp_C_1) %>%
+  group_by(DateTime) %>%
+  summarise(mean_insitu_temp = mean(ThermistorTemp_C_1, na.rm = T))
+bvr_all <- left_join(bvr_temp, bvr_insitu, by = c("time" = "DateTime"))
+bvr_all <- na.omit(bvr_all)
+
+ggplot(bvr_all, aes(x = mean_thermal_C, y = mean_insitu_temp, color = time)) +
+  geom_point() +
+  scale_color_viridis(trans = 'date') +
+  theme_classic() +
+  geom_abline(intercept = 0, slope = 1) +
+  xlim(-3, 35) + ylim(-3, 35) +
+  labs(x = "Remotely sensed temperature (C)", y = "In situ temperature (C)",
+       color = element_blank(), title = "FCR")
+
+
+
