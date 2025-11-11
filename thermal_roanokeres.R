@@ -173,6 +173,17 @@ fcr_tempcomp <- ggplot(fcr_all, aes(x = mean_thermal_C, y = mean_insitu_temp, co
        color = element_blank(), title = "FCR")
 fcr_tempcomp
 
+# get stdev
+ggplot(fcr_all, aes(x = time, y = mean_thermal_C - mean_insitu_temp)) +
+  geom_point() +
+  theme_classic() +
+  geom_abline(slope = 0, intercept = 0)
+
+resids <- fcr_all$mean_thermal_C - fcr_all$mean_insitu_temp
+sd(resids)
+
+
+
 ccr_temp <- read_csv("thermal_LS_CCR.csv")
 ccr_insitu <- read_csv("ccre-waterquality_2021_2024.csv")
 ccr_insitu$DateTime <- as.Date(ccr_insitu$DateTime)
@@ -193,8 +204,16 @@ ccr_tempcomp <- ggplot(ccr_all, aes(x = mean_thermal_C, y = mean_insitu_temp, co
        color = element_blank(), title = "CCR")
 ccr_tempcomp
 
+diff <- ccr_all$mean_thermal_C - ccr_all$mean_insitu_temp
+sd(diff)
+
+
+
 library(patchwork)
 ccr_tempcomp + fcr_tempcomp
+
+
+
 #
 
 

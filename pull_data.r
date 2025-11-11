@@ -94,12 +94,20 @@ create_data_cube <- function(bbox, bbox_utm, start_date, end_date, HLStype) {
 }
 
 # set date of interest
-start_date <- "2019-01-01T00:00:00Z"
-end_date <- "2019-03-30T00:00:00Z"
-data_S30 <- create_data_cube(ccr_box, ccr_box_utm, start_date, end_date, "HLSS")
-data_L30 <- create_data_cube(ccr_box, ccr_box_utm, start_date, end_date, "HLSL")
+start_date <- "2014-01-09T00:00:00Z"
+end_date <- "2025-10-22T00:00:00Z"
+data_S30 <- create_data_cube(fcr_box, fcr_box_utm, start_date, end_date, "HLSS")
+data_L30 <- create_data_cube(fcr_box, fcr_box_utm, start_date, end_date, "HLSL")
 
-
+# for plotting some dates
+desired_dates <- alldata[alldata$resids > 10,] %>%
+  select(time)
+desired_dates <- as.Date(desired_dates$time)
+desired_times <- format(desired_dates, "%Y-%m-%dT00:00:00Z")
+data_S30 <- data_S30 %>%
+  select_time(desired_times)
+data_L30 <- data_L30 %>%
+  select_time(desired_times)
 ################################################################################
 # Function to create water mask
 ################################################################################
@@ -183,6 +191,10 @@ masked_vnir <- function(datacube_HLSS, datacube_HLSL, watermask) {
   vnir_stars <- c(vnir_stars_S30, vnir_stars_L30, along = 3)
   # again, remove empty dates
   # build cleaned object by stacking only valid slices
+  # remove dates with no imagery
+  arr <- vnir_stars[[1]] # extract raw array (x, y, time)
+  non_na_counts <- apply(arr, 3, function(slice) sum(!is.na(slice))) # count non-NA pixels for each time
+  valid_idx <- which(non_na_counts > 0) # indices of slices that have at least one real value
   slices <- lapply(valid_idx, function(i) vnir_stars[,,, i, drop = FALSE])
   clean_vnir_stars <- do.call(c, c(slices, along = "time"))
   # mask out land
@@ -273,15 +285,21 @@ result_df
 ############
 
 
+tm_shape(shp = chla_stars[,,,c(3, 4, 5, 9)]) + 
+  tm_rgb(r = "red", g = "green", b = "blue",
+         col.scale = tm_scale_rgb(max_color_value = .08))
 # viz
 ggplot() +
-  geom_stars(data = chla_stars, aes(fill = chla_pred_lm)) +
+  geom_stars(data = chla_stars[,,,c(3, 4, 5, 9)], 
+             aes(fill = chla_pred_lm)) +
   facet_wrap(~time, ncol = 4) +
   scale_fill_viridis_c(
     option = "viridis",
-    na.value = "white", #+ #,
-    trans = 'log') + # make NA cells white instead of gray
-    theme_void() #+
+    na.value = "white",
+    trans = 'log',
+    breaks = c(5, 15, 50)) + # make NA cells white instead of gray
+    theme_void() +
+  theme(legend.position = 'bottom') #+
   #geom_point(data = fcr_point, aes(x, y), color = 'red', size = 3)
 
 
@@ -315,6 +333,7 @@ alldata
 alldata <- alldata[alldata$mean_value < 40 & alldata$dock_value < 40,]
 write_csv(alldata, 'reservoirs_vnir_data/all_chla_est.csv')
 alldata <- read_csv('reservoirs_vnir_data/all_chla_est.csv')
+alldata$resids <- abs(alldata$mean_value - alldata$dock_value)
 
 ggplot() +
   geom_point(data = alldata, aes(x = time, y = mean_value, color = 'darkblue')) +

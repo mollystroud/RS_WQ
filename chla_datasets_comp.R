@@ -179,6 +179,13 @@ ggplot(flora_filtered, aes(x = TotalConc_ugL, y = Chla_ugL, color = DateTime)) +
   theme_classic() +
   labs(y = "Filtered Chla")
 
+ggplot(flora_filtered[flora_filtered$Site.x == flora_filtered$Site.y,], aes(x = DateTime, y = Chla_ugL - TotalConc_ugL, 
+                           color = Reservoir)) +
+  geom_point() +
+  theme_classic() +
+  geom_abline(slope = 0, intercept = 0) +
+  scale_color_viridis(discrete = T) +
+  labs(x = element_blank(), y = "Filtered Chla - Flora Chla")
 
 
 

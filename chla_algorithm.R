@@ -29,7 +29,8 @@ ccr_plot <- ggplot(model_ccr_preds, aes(x = X1, y = X2)) +
   geom_abline(slope = 1, intercept = 0) +
   theme_classic() +
   labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
-       title = "Filtered Chl-a estimates, CCR") 
+       title = "Filtered Chl-a estimates, CCR")  +
+  xlim(0, 10) + ylim(0, 10)
 ccr_plot
 
 # FCR

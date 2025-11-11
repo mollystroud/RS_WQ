@@ -18,7 +18,9 @@ yarra_chla <- yarra_wq[yarra_wq$variable == "PHY_TCHLA",]
 yarra_turb <- yarra_wq[yarra_wq$variable == "turbidity",]
 
 yarra_chla <- yarra_chla[yarra_chla$depth <= 0.1,]
-yarra_dates <- unique(as.Date(yarra_chla$datetime[yarra_chla$datetime > "2013-04-10"]))
+yarra_turb <- yarra_turb[yarra_turb$depth <= 0.1,]
+
+yarra_dates <- unique(as.Date(yarra_turb$datetime[yarra_turb$datetime > "2013-04-10"]))
 
 
 ################################################################################
@@ -81,7 +83,7 @@ get_dates <- function(bbox, dates) {
 }
 
 # call function to get dates
-yarra_hls_datetime <- get_dates(yarra_box_small, rev(yarra_dates)) # need to order in ascending chrono, rev if needed
+yarra_hls_datetime <- get_dates(yarra_box_small, (yarra_dates)) # need to order in ascending chrono, rev if needed
 yarra_hls_datetime
 
 ################################################################################
@@ -112,6 +114,13 @@ yarra_chla_joined <- left_join(yarra_chla_joined, yarra_joined,
                              by = c("datetime" = "chla_dates"))
 yarra_chla_joined <- unique(yarra_chla_joined)
 yarra_chla_joined
+# or turb
+yarra_turb$datetime <- as.Date(yarra_turb$datetime)
+yarra_turb_joined <- yarra_turb[yarra_turb$datetime %in% yarra_joined$chla_dates,]
+yarra_turb_joined <- left_join(yarra_turb_joined, yarra_joined, 
+                               by = c("datetime" = "chla_dates"))
+yarra_turb_joined <- unique(yarra_turb_joined)
+yarra_turb_joined
 ################################################################################
 # function to perform stac_search on specific dates
 ################################################################################
@@ -150,6 +159,10 @@ get_items <- function(joined_df, bbox){
 
 items_yarra <- get_items(yarra_chla_joined, yarra_box_small)
 items_yarra
+items_yarra <- get_items(yarra_turb_joined, yarra_box_small)
+items_yarra
+
+
 ################################################################################
 # function to extract values HLSS or HLSL data based on lat/longs
 ################################################################################
@@ -217,12 +230,8 @@ get_vals <- function(HLStype, itemlist, joined_df, bbox_utm){
 # add lat/long
 yarra_chla_joined$Latitude <- -37.67628
 yarra_chla_joined$Longitude <- 145.90053
-#yarra_chla_joined$Latitude[1] <- -37.67631
-#yarra_chla_joined$Longitude[1] <- 145.90042
 # dates need to be ordered correctly
 yarra_chla_joined <- yarra_chla_joined[nrow(yarra_chla_joined):1, ]
-
-
 # call function
 yarra_vals_HLSS <- get_vals("HLSS", items_yarra, yarra_chla_joined, yarra_box_utm_small)
 yarra_vals_HLSL <- get_vals("HLSL", items_yarra, yarra_chla_joined, yarra_box_utm_small)
@@ -234,26 +243,51 @@ yarra_alldata <- yarra_alldata[!is.na(yarra_alldata$FID),] # remove nas
 yarra_alldata <- yarra_alldata[!duplicated(yarra_alldata), ] # remove duplicates
 write_csv(yarra_alldata, "yarra_chla_matchups_2day.csv")
 
+# turb
+yarra_turb_joined$Latitude <- -37.67628
+yarra_turb_joined$Longitude <- 145.90053
+# dates need to be ordered correctly
+#yarra_turb_joined <- yarra_turb_joined[nrow(yarra_turb_joined):1, ]
+# call function
+yarra_vals_HLSS <- get_vals("HLSS", items_yarra, yarra_turb_joined, yarra_box_utm_small)
+yarra_vals_HLSL <- get_vals("HLSL", items_yarra, yarra_turb_joined, yarra_box_utm_small)
+yarra_vals <- data.frame(rbind(yarra_vals_HLSS, yarra_vals_HLSL)) # join
+yarra_vals$time <- as.Date(yarra_vals$time)
+yarra_alldata <- left_join(yarra_turb_joined, yarra_vals, # join with in situ
+                           by = c("HLS_dates" = "time", "Latitude" = "X2", "Longitude" = "X1"))
+yarra_alldata <- yarra_alldata[!is.na(yarra_alldata$FID),] # remove nas
+yarra_alldata <- yarra_alldata[!duplicated(yarra_alldata), ] # remove duplicates
+write_csv(yarra_alldata, "yarra_turb_matchups_2day.csv")
 
-# CCR
-yarra_alldata <- read_csv("yarra_chla_matchups_2day.csv") # read in data
+
+
+
+
+
+
+# Make model
+yarra_alldata <- read_csv("yarra_turb_matchups_2day.csv") # read in data
+yarra_alldata <- yarra_alldata %>% group_by(HLS_dates) %>%
+  summarize(observation = mean(observation),
+            blue = mean(blue), red = mean(red),
+            green = mean(green), NIR = mean(NIR))
 
 yarra_alldata <- yarra_alldata[yarra_alldata$NIR > 0 & yarra_alldata$red > 0 &
                                  yarra_alldata$green > 0 & yarra_alldata$blue > 0,]
 # create model 
-model_yarra <- lm(log10(observation) ~ blue + green + red + NIR, data = yarra_alldata)
+model_yarra <- lm((observation) ~ blue + green + red + NIR, data = yarra_alldata)
 model_yarra_preds <- data.frame(cbind((predict(model_yarra)), yarra_alldata$observation))
 summary(model_yarra) # summary stats
-10^sqrt(mean(model_yarra$residuals^2)) # rmse
+sqrt(mean(model_yarra$residuals^2)) # rmse
 # plot
-yarra_plot <- ggplot(model_yarra_preds, aes(x = 10^X1, y = X2)) +
+yarra_plot <- ggplot(model_yarra_preds, aes(x = X1, y = X2)) +
   geom_point() +
   geom_abline(slope = 1, intercept = 0) +
   theme_classic() +
-  labs(x = "Predicted Chl-a (ugL)", y = "Actual Chl-A (ugL)",
+  labs(x = "Predicted Turbidity (FNU?)", y = "Actual Turbidity (FNU?)",
        title = "Yarra Reservoir") +
-  annotate("text", label = "RMSE = 1.5, R2 = 0.3", x = 1, y = 3) +
-  xlim(0, 3) + ylim(0, 3)
+  annotate("text", label = "RMSE = 0.49, R2 = 0.63", x = 1.5, y = 4) +
+  xlim(0, 5) + ylim(0, 5)
 yarra_plot
 
 
